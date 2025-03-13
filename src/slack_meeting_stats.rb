@@ -1,14 +1,14 @@
 #!/usr/bin/env ruby
 
-require "optparse"
-require "date"
-require "sqlite3"
-require "fileutils"
-require "gruff"
+require 'optparse'
+require 'date'
+require 'sqlite3'
+require 'fileutils'
+require 'gruff'
 
-DB_FILE = File.expand_path("../data/meeting_data.sqlite3", __dir__)
-SLACK_MD_FILE = File.expand_path("../team_slack_reports.md", __dir__)
-IMG_DIR = File.expand_path("../images", __dir__)
+DB_FILE = File.expand_path('../data/meeting_data.sqlite3', __dir__)
+SLACK_MD_FILE = File.expand_path('../team_slack_reports.md', __dir__)
+IMG_DIR = File.expand_path('../images', __dir__)
 
 # Initialize database
 def initialize_db
@@ -47,7 +47,7 @@ def prompt_yes_no(question)
   loop do
     print "#{question} (y/N): "
     response = gets.strip.downcase
-    return response == "y" if ["y", "n", ""].include?(response)
+    return response == 'y' if ['y', 'n', ''].include?(response)
 
     puts "Please enter 'y' or 'n'."
   end
@@ -56,42 +56,49 @@ end
 # Collect team data from user
 def collect_team_data(meeting_date)
   teams = [
-    "Chef Client",
-    "Chef Server",
-    "Chef Workstation",
-    "Automate",
-    "Habitat",
-    "Courier",
-    "Inspec",
+    'Chef Client',
+    'Chef Server',
+    'Chef Workstation',
+    'Automate',
+    'Habitat',
+    'Courier',
+    'Inspec',
   ]
   data = []
 
   puts "Please fill in data about the #{meeting_date} meeting"
   teams.each do |team|
     puts "\nTeam: #{team}"
-    present = prompt_yes_no("Was the team present?")
+    present = prompt_yes_no('Was the team present?')
     if present
-      current_work = prompt_yes_no("Did they discuss current work?")
-      print "Enter build status (e.g. 'green', 'red', or 'main:green, 18:red'): "
+      current_work = prompt_yes_no('Did they discuss current work?')
+      print "Enter build status (e.g. green, red, or 'main:green, 18:red'): "
       build_status = gets.strip
-      fix_points = if build_status.include?("red")
-                     prompt_yes_no("Did they point to work to fix the build?") ? "Y" : "N"
+      fix_points = if build_status.include?('red')
+                     if prompt_yes_no(
+                       'Did they point to work to fix the build?',
+                     )
+                       'Y'
+                     else
+                       'N'
+                     end
                    else
-                     "-"
+                     '-'
                    end
-      merged_prs = prompt_yes_no("Did they list merged PRs that week?")
-      print "Any extra notes? (leave empty if none): "
+      merged_prs = prompt_yes_no('Did they list merged PRs that week?')
+      print 'Any extra notes? (leave empty if none): '
       extra_notes = gets.strip
-      extra = merged_prs ? "listed merged PRs" : "-"
+      extra = merged_prs ? 'listed merged PRs' : '-'
       extra += ", #{extra_notes}" unless extra_notes.empty?
     else
       current_work = false
-      build_status = ""
-      fix_points = "-"
-      extra = "-"
+      build_status = ''
+      fix_points = '-'
+      extra = '-'
     end
 
-    data << [team, present ? "Y" : "N", current_work ? "Y" : "N", build_status, fix_points, extra]
+    data << [team, present ? 'Y' : 'N', current_work ? 'Y' : 'N', build_status,
+fix_points, extra]
   end
 
   data
@@ -101,7 +108,15 @@ end
 def record_meeting_data(meeting_date, team_data)
   db = SQLite3::Database.new(DB_FILE)
   team_data.each do |row|
-    db.execute("INSERT INTO meeting_stats (meeting_date, team, present, current_work, build_status, fix_points, extra) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(meeting_date, team) DO UPDATE SET present=excluded.present, current_work=excluded.current_work, build_status=excluded.build_status, fix_points=excluded.fix_points, extra=excluded.extra", [meeting_date.to_s] + row)
+    db.execute(
+      'INSERT INTO meeting_stats (meeting_date, team, present, current_work,' +
+      'build_status, fix_points, extra) VALUES (?, ?, ?, ?, ?, ?, ?)' +
+      ' ON CONFLICT(meeting_date, team) DO UPDATE' +
+      ' SET present=excluded.present, current_work=excluded.current_work,' +
+      ' build_status=excluded.build_status, fix_points=excluded.fix_points,' +
+      ' extra=excluded.extra',
+      [meeting_date.to_s] + row,
+    )
   end
   db.close
 end
@@ -109,65 +124,77 @@ end
 # Retrieve meeting data from database
 def fetch_meeting_data(meeting_date)
   db = SQLite3::Database.new(DB_FILE)
-  results = db.execute("SELECT team, present, current_work, build_status, fix_points, extra FROM meeting_stats WHERE meeting_date = ?", [meeting_date.to_s])
+  results = db.execute(
+    'SELECT team, present, current_work, build_status, fix_points, extra' +
+    ' FROM meeting_stats WHERE meeting_date = ?',
+    [meeting_date.to_s],
+  )
   db.close
   results
 end
 
 # Format Yes/No to display emojis
 def format_yes_no(value)
-  return "❌" if value.strip.upcase == "N"
-  return "✅" if value.strip.upcase == "Y"
+  return '❌' if value.strip.upcase == 'N'
+  return '✅' if value.strip.upcase == 'Y'
 
   value
 end
 
 # Format build status to display emojis correctly
 def format_build_status(status)
-  return "❌" if status.nil? || status.strip.empty?
+  return '❌' if status.nil? || status.strip.empty?
 
-  if %w{red green}.include?(status)
+  if %w(red green).include?(status)
     status = "main:#{status}"
   end
-  status.gsub("red", "❌").gsub("green", "✅")
+  status.gsub('red', '❌').gsub('green', '✅')
 end
 
 # Generate Markdown table
 def generate_md_page
   db = SQLite3::Database.new(DB_FILE)
-  meeting_dates = db.execute("SELECT DISTINCT meeting_date FROM meeting_stats ORDER BY meeting_date DESC").flatten
+  meeting_dates = db.execute(
+    'SELECT DISTINCT meeting_date FROM meeting_stats ORDER BY meeting_date' +
+    ' DESC',
+  ).flatten
   md = [
-    "# Slack status tracking",
-    "",
-    "This document tracks status updates from Progress teams. While other",
-    "teams such as Sous Chefs, Cinc, and Meta sometimes post updates, this",
-    "document tracks internal teams only",
-    "",
-    "This page is generated by slack_meeting_stats.rb, do not edit manually",
-    "",
-    "## Trends",
-    "",
-    "[![Attendance](images/attendance-small.png)](images/attendance-full.png)",
-    "[![Build Status",
-    " Reports](images/build_status-small.png)](images/build_status-full.png)",
-    "",
+    '# Slack status tracking',
+    '',
+    'This document tracks status updates from Progress teams. While other',
+    'teams such as Sous Chefs, Cinc, and Meta sometimes post updates, this',
+    'document tracks internal teams only',
+    '',
+    'This page is generated by slack_meeting_stats.rb, do not edit manually',
+    '',
+    '## Trends',
+    '',
+    '[![Attendance](images/attendance-small.png)](images/attendance-full.png)',
+    '[![Build Status',
+    ' Reports](images/build_status-small.png)](images/build_status-full.png)',
+    '',
   ]
 
   meeting_dates.each do |meeting_date|
-    team_data = db.execute("SELECT team, present, current_work, build_status, fix_points, extra FROM meeting_stats WHERE meeting_date = ?", [meeting_date])
+    team_data = db.execute(
+      'SELECT team, present, current_work, build_status, fix_points, extra' +
+      ' FROM meeting_stats WHERE meeting_date = ?',
+      [meeting_date],
+    )
     md << "## #{meeting_date}"
-    md << ""
-    md << "| Team | Present | Current work | Build Status | If builds broken, points to work to fix it | Extra |"
-    md << "| --- | ---- | --- | --- | --- | --- |"
+    md << ''
+    md << '| Team | Present | Current work | Build Status |' +
+          'If builds broken, points to work to fix it | Extra |'
+    md << '| --- | ---- | --- | --- | --- | --- |'
     team_data.each do |row|
       row = row.dup # This makes the row mutable
       row[1] = format_yes_no(row[1])  # Present
       row[2] = format_yes_no(row[2])  # Current work
       row[3] = format_build_status(row[3]) # Build Status
       row[4] = format_yes_no(row[4]) # Fix Points
-      md << "| " + row.join(" | ") + " |"
+      md << '| ' + row.join(' | ') + ' |'
     end
-    md << ""
+    md << ''
   end
   db.close
   md.join("\n")
@@ -175,7 +202,10 @@ end
 
 def generate_plots
   db = SQLite3::Database.new(DB_FILE)
-  data = db.execute("SELECT meeting_date, team, present, build_status FROM meeting_stats ORDER BY meeting_date ASC")
+  data = db.execute(
+    'SELECT meeting_date, team, present, build_status FROM meeting_stats' +
+    ' ORDER BY meeting_date ASC',
+  )
   db.close
 
   dates = data.map { |row| row[0] }.uniq
@@ -184,64 +214,74 @@ def generate_plots
 
   dates.each do |date|
     total_teams = data.count { |row| row[0] == date }
-    present_teams = data.count { |row| row[0] == date && row[2] == "Y" }
-    reporting_builds = data.count { |row| row[0] == date && row[3] != "N" && !row[3].strip.empty? }
+    present_teams = data.count { |row| row[0] == date && row[2] == 'Y' }
+    reporting_builds = data.count do |row|
+      row[0] == date && row[3] != 'N' && !row[3].strip.empty?
+    end
 
-    attendance_percentages << (total_teams == 0 ? 0 : (present_teams.to_f / total_teams) * 100)
-    build_status_percentages << (total_teams == 0 ? 0 : (reporting_builds.to_f / total_teams) * 100)
+    attendance_percentages <<
+      (total_teams == 0 ? 0 : (present_teams.to_f / total_teams) * 100)
+    build_status_percentages <<
+      (total_teams == 0 ? 0 : (reporting_builds.to_f / total_teams) * 100)
   end
 
   sizes = {
-    "full" => [800, 500],
-    "small" => [400, 250],
+    'full' => [800, 500],
+    'small' => [400, 250],
   }
 
   sizes.each do |name, size|
     g = Gruff::Line.new(size[0], size[1])
     g.maximum_value = 100
     g.minimum_value = 0
-    g.title = "Percentage of Teams Present Over Time"
-    g.data("% Teams Present", attendance_percentages)
+    g.title = 'Percentage of Teams Present Over Time'
+    g.data('% Teams Present', attendance_percentages)
     g.labels = dates.each_with_index.to_h
     g.write(::File.join(IMG_DIR, "attendance-#{name}.png"))
 
     g2 = Gruff::Line.new(size[0], size[1])
     g2.maximum_value = 100
     g2.minimum_value = 0
-    g2.title = "Percentage of Teams Reporting Build Status Over Time"
-    g2.data("% Reporting Build Status", build_status_percentages)
+    g2.title = 'Percentage of Teams Reporting Build Status Over Time'
+    g2.data('% Reporting Build Status', build_status_percentages)
     g2.labels = dates.each_with_index.to_h
     g2.write(::File.join(IMG_DIR, "build_status-#{name}.png"))
   end
 end
 
 # Parse command-line arguments
-options = { mode: "record" }
+options = { mode: 'record' }
 OptionParser.new do |opts|
-  opts.banner = "Usage: script.rb [options]"
-  opts.on("--mode MODE", "Mode: record, markdown, or plot") { |v| options[:mode] = v }
-  opts.on("--date DATE", "Date of the meeting in YYYY-MM-DD format") { |v| options[:date] = Date.parse(v) rescue nil }
+  opts.banner = 'Usage: script.rb [options]'
+  opts.on('--mode MODE', 'Mode: record, markdown, or plot') do |v|
+    options[:mode] = v
+  end
+  opts.on('--date DATE', 'Date of the meeting in YYYY-MM-DD format') do |v|
+    options[:date] =
+      begin
+        Date.parse(v)
+      rescue
+        nil
+      end
+  end
 end.parse!
 
 initialize_db
 meeting_date = options[:date] || get_last_thursday
 
 case options[:mode]
-when "record"
+when 'record'
   team_data = collect_team_data(meeting_date)
   record_meeting_data(meeting_date, team_data)
   puts "Data recorded for #{meeting_date}."
-when "markdown"
-  puts "Updating plots..."
+when 'markdown'
+  puts 'Updating plots...'
   generate_plots
   puts "Generating #{SLACK_MD_FILE}"
-  File.open(SLACK_MD_FILE, "w") do |fh|
-    fh.write(generate_md_page)
-  end
-when "plot"
+  File.write(SLACK_MD_FILE, generate_md_page)
+when 'plot'
   generate_plots
-  puts "Plots generated: attendance.png and build_status.png"
+  puts 'Plots generated: attendance.png and build_status.png'
 else
-  puts "Invalid mode. Use --mode record, markdown, or plot."
+  puts 'Invalid mode. Use --mode record, markdown, or plot.'
 end
-

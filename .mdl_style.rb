@@ -1,1 +1,1 @@
-rule "MD013", tables: false
+rule 'MD013', tables: false
