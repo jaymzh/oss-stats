@@ -27,4 +27,4 @@ jobs:
     - name: Run chefstyle
       run: ./scripts/run_chefstyle.sh
     - name: Run markdownlint
-      run: ./scripts/run_markdownlint.sh
+      run: ./scripts/run_markdownlint.sh .
