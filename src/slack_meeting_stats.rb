@@ -147,8 +147,9 @@ def generate_md_page
     "",
     "## Trends",
     "",
-    "![Attendance](images/attendance.png)",
-    "![Build Status Reports](images/build_status.png)",
+    "[![Attendance](images/attendance-small.png)](images/attendance-full.png)",
+    "[![Build Status",
+    " Reports](images/build_status-small.png)](images/build_status-full.png)",
     "",
   ]
 
@@ -190,21 +191,28 @@ def generate_plots
     build_status_percentages << (total_teams == 0 ? 0 : (reporting_builds.to_f / total_teams) * 100)
   end
 
-  g = Gruff::Line.new(800, 500)
-  g.maximum_value = 100
-  g.minimum_value = 0
-  g.title = "Percentage of Teams Present Over Time"
-  g.data("% Teams Present", attendance_percentages)
-  g.labels = dates.each_with_index.to_h
-  g.write(::File.join(IMG_DIR, "attendance.png"))
+  sizes = {
+    "full" => [800, 500],
+    "small" => [400, 250],
+  }
 
-  g2 = Gruff::Line.new(800, 500)
-  g2.maximum_value = 100
-  g2.minimum_value = 0
-  g2.title = "Percentage of Teams Reporting Build Status Over Time"
-  g2.data("% Reporting Build Status", build_status_percentages)
-  g2.labels = dates.each_with_index.to_h
-  g2.write(::File.join(IMG_DIR, "build_status.png"))
+  sizes.each do |name, size|
+    g = Gruff::Line.new(size[0], size[1])
+    g.maximum_value = 100
+    g.minimum_value = 0
+    g.title = "Percentage of Teams Present Over Time"
+    g.data("% Teams Present", attendance_percentages)
+    g.labels = dates.each_with_index.to_h
+    g.write(::File.join(IMG_DIR, "attendance-#{name}.png"))
+
+    g2 = Gruff::Line.new(size[0], size[1])
+    g2.maximum_value = 100
+    g2.minimum_value = 0
+    g2.title = "Percentage of Teams Reporting Build Status Over Time"
+    g2.data("% Reporting Build Status", build_status_percentages)
+    g2.labels = dates.each_with_index.to_h
+    g2.write(::File.join(IMG_DIR, "build_status-#{name}.png"))
+  end
 end
 
 # Parse command-line arguments

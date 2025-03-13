@@ -12,7 +12,7 @@ jobs:
         ruby: [3.1, 3.3]
     runs-on: ubuntu-latest
     steps:
-    - name: Install deps
+    - name: Install system deps
       run: |
         sudo apt-get update
         sudo apt-get -y install imagemagick libmagickwand-dev
@@ -22,9 +22,12 @@ jobs:
       uses: ruby/setup-ruby@v1
       with:
         ruby-version: ${{ matrix.ruby }}
-    - name: Install dependencies
+    - name: Install ruby dependencies
       run: bundle install
     - name: Run chefstyle
       run: ./scripts/run_chefstyle.sh
+    # it's a but dumb to run MDL on two versions of ruby
+    # but it's better than re-setting up a container, installing
+    # imagemagic so that we can bundle install...
     - name: Run markdownlint
       run: ./scripts/run_markdownlint.sh .
