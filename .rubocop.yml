@@ -16,3 +16,12 @@ Style/TrailingCommaInHashLiteral:
 
 Style/TrailingCommaInArguments:
   EnforcedStyleForMultiline: comma
+
+Style/PercentLiteralDelimiters:
+  PreferredDelimiters:
+    default: '{}'
+    '%i': '{}'
+    '%I': '{}'
+    '%w': '{}'
+    '%W': '{}'
+    '%r': '{}'

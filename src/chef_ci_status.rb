@@ -55,6 +55,7 @@ def get_pr_and_issue_stats(client, options)
 
       # Track oldest open PR/Issue with days open and last activity days
       if closed_date.nil? &&
+         !labels.include?('Status: Waiting on Contributor') &&
          (stats[:oldest_open].nil? || created_date < stats[:oldest_open])
         stats[:oldest_open] = created_date
         stats[:oldest_open_days] = days_open
@@ -172,6 +173,27 @@ status: 'completed', per_page: 100, page:)
   failed_tests
 end
 
+def print_pr_or_issue_stats(stats, item)
+  item_plural = item + 's'
+  puts "\n  #{item} Stats:"
+  puts "    Opened #{item_plural}: #{stats[:opened]}"
+  puts "    Closed #{item_plural}: #{stats[:closed]}"
+  if stats[:oldest_open]
+    puts "    Oldest Open #{item}: #{stats[:oldest_open]}" +
+         " (#{stats[:oldest_open_days]} days open, last activity" +
+         " #{stats[:oldest_open_last_activity]} days ago)"
+  end
+  puts "    Stale #{item} (>30 days without comment): " +
+       stats[:stale_count].to_s
+  avg_time = stats[:avg_time_to_close_hours]
+  avg_time_str = if avg_time > 24
+                   (avg_time / 24).round(2).to_s + ' days'
+                 else
+                   avg_time.round(2).to_s + ' hours'
+                 end
+  puts "    Avg Time to Close #{item_plural}: #{avg_time_str}"
+end
+
 options = {
   org: 'chef',
   repo: 'chef',
@@ -181,7 +203,7 @@ options = {
   mode: ['all'],
 }
 
-valid_modes = %w(ci pr issue all)
+valid_modes = %w{ci pr issue all}
 OptionParser.new do |opts|
   opts.banner = 'Usage: chef_ci_status.rb [options]'
 
@@ -238,7 +260,7 @@ OptionParser.new do |opts|
     options[:verbose] = true
   end
 end.parse!
-options[:mode] = %w(ci pr issue) if options[:mode].include?('all')
+options[:mode] = %w{ci pr issue} if options[:mode].include?('all')
 
 if options[:verbose]
   puts "Options: #{options}"
@@ -254,39 +276,10 @@ puts "[#{options[:org]}/#{options[:repo]}] Stats (Last #{options[:days]} days)"
 if options[:mode].include?('pr') || options[:mode].include?('issue')
   stats = get_pr_and_issue_stats(client, options)
 
-  if options[:mode].include?('pr')
-    puts "\n  PR Stats:"
-    puts "    Opened PRs: #{stats[:pr][:opened]}"
-    puts "    Closed PRs: #{stats[:pr][:closed]}"
-    puts "    Oldest Open PR: #{stats[:pr][:oldest_open] || 'N/A'}" +
-         " (#{stats[:pr][:oldest_open_days]} days open, last activity" +
-         " #{stats[:pr][:oldest_open_last_activity]} days ago)"
-    puts "    Stale PRs (>30 days without comment): #{stats[:pr][:stale_count]}"
-    avg_time = stats[:pr][:avg_time_to_close_hours]
-    avg_time_str = if avg_time > 24
-                     (avg_time / 24).round(2).to_s + ' days'
-                   else
-                     avg_time.round(2).to_s + ' hours'
-                   end
-    puts "    Avg Time to Close PRs: #{avg_time_str}"
-  end
-
-  if options[:mode].include?('issue')
-    puts "\n  Issue Stats:"
-    puts "    Opened Issues: #{stats[:issue][:opened]}"
-    puts "    Closed Issues: #{stats[:issue][:closed]}"
-    puts "    Oldest Open Issue: #{stats[:issue][:oldest_open] || 'N/A'}" +
-         " (#{stats[:issue][:oldest_open_days]} days open, last activity" +
-         " #{stats[:issue][:oldest_open_last_activity]} days ago)"
-    puts '    Stale Issues (>30 days without comment): ' +
-         stats[:issue][:stale_count].to_s
-    avg_time = stats[:issue][:avg_time_to_close_hours]
-    avg_time_str = if avg_time > 24
-                     (avg_time / 24).round(2).to_s + ' days'
-                   else
-                     avg_time.round(2).to_s + ' hours'
-                   end
-    puts "    Avg Time to Close Issues: #{avg_time_str}"
+  %w{PR Issue}.each do |item|
+    if options[:mode].include?(item.downcase)
+      print_pr_or_issue_stats(stats[item.downcase.to_sym], item)
+    end
   end
 end
 

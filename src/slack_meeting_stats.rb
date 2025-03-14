@@ -145,7 +145,7 @@ end
 def format_build_status(status)
   return '❌' if status.nil? || status.strip.empty?
 
-  if %w(red green).include?(status)
+  if %w{red green}.include?(status)
     status = "main:#{status}"
   end
   status.gsub('red', '❌').gsub('green', '✅')
