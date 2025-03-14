@@ -25,7 +25,7 @@ chef_repos=(
     win32-certstore
     win32-ipc
     win32-taskscheduler
-    win22-process
+    win32-process
     win32-event
     win32-api
     win32-eventlog
@@ -38,7 +38,6 @@ chef_repos=(
 # automate
 chef_repos+=(
     automate
-    chef-manage
 )
 
 # workstation
@@ -51,7 +50,7 @@ chef_repos+=(
     chef-server
     erlang-bcrypt
     chef_authn
-    chef_reg
+    chef_req
     chef_secrets
     efast_xs
     epgsql
@@ -77,14 +76,10 @@ habitat_repos=(
     homebrew-habitat
 )
 
-chef_repos+=(
-    chef-base-plans
-)
-
-# inspect
+# inspec
 inspec_repos=(
-    inspect
-    inspec-digital-ocean
+    inspec
+    inspec-digitalocean
     inspec-habitat
     inspec-oneview
     inspec-vmware
