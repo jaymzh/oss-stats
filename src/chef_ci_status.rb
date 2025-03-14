@@ -259,7 +259,7 @@ if options[:mode].include?('pr') || options[:mode].include?('issue')
     puts "    Opened PRs: #{stats[:pr][:opened]}"
     puts "    Closed PRs: #{stats[:pr][:closed]}"
     puts "    Oldest Open PR: #{stats[:pr][:oldest_open] || 'N/A'}" +
-         "(#{stats[:pr][:oldest_open_days]} days open, last activity" +
+         " (#{stats[:pr][:oldest_open_days]} days open, last activity" +
          " #{stats[:pr][:oldest_open_last_activity]} days ago)"
     puts "    Stale PRs (>30 days without comment): #{stats[:pr][:stale_count]}"
     avg_time = stats[:pr][:avg_time_to_close_hours]
