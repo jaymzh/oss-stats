@@ -1,3 +1,3 @@
 #!/bin/bash
 
-bundle exec mdl "$@"
+exec bundle exec mdl "$@"

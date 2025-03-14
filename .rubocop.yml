@@ -1,0 +1,18 @@
+AllCops:
+  TargetRubyVersion: 3.1
+
+Layout/LineLength:
+  Enabled: true
+  Max: 80
+
+Style/LineEndConcatenation:
+  Enabled: false
+
+Style/TrailingCommaInArrayLiteral:
+  EnforcedStyleForMultiline: comma
+
+Style/TrailingCommaInHashLiteral:
+  EnforcedStyleForMultiline: comma
+
+Style/TrailingCommaInArguments:
+  EnforcedStyleForMultiline: comma

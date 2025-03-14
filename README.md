@@ -23,11 +23,15 @@ $ ./src/chef_ci_status.rb --days 1 --branches chef-18,main
   PR Stats (Last 1 days):
     Opened PRs: 11
     Closed PRs: 12
+    Oldest Open PR: 2024-09-06 (188 days open, last activity 49 days ago)
+    Stale PRs (>30 days without comment): 11
     Avg Time to Close PRs: 1.26 days
 
   Issue Stats (Last 1 days):
     Opened Issues: 0
     Closed Issues: 0
+    Oldest Open Issue: 2024-09-23 (171 days open, last activity 27 days ago)
+    Stale Issues (>30 days without comment): 13
     Avg Time to Close Issues: 0 hours
 
   CI Failure Stats (last 1 days):

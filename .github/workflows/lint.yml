@@ -25,7 +25,7 @@ jobs:
     - name: Install ruby dependencies
       run: bundle install
     - name: Run chefstyle
-      run: ./scripts/run_chefstyle.sh
+      run: ./scripts/run_cookstyle.sh
     # it's a but dumb to run MDL on two versions of ruby
     # but it's better than re-setting up a container, installing
     # imagemagic so that we can bundle install...
