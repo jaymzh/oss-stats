@@ -36,9 +36,8 @@ class ConfigLoadingTest < Minitest::Test
   
   def test_custom_config_loading
     # This is a simple test to check if the script can load a custom config
-    # The help command uses the defaults from Settings, not from --config
-    # So we'll just check that the config file is loaded without errors
-    output = `ruby #{File.expand_path('../src/chef_ci_status.rb', __dir__)} --config #{@temp_config.path} --help`
+    # Using --dry-run to avoid actual GitHub API calls
+    output = `ruby #{File.expand_path('../src/chef_ci_status.rb', __dir__)} --config #{@temp_config.path} --dry-run 2>&1`
     
     # Verify the config was loaded
     assert_match(/Loaded custom configuration from/, output, 
@@ -52,13 +51,15 @@ class ConfigLoadingTest < Minitest::Test
   def test_fallback_to_defaults
     # Test that the script falls back to defaults when config isn't found
     # We use a non-existent file path
-    output = `ruby #{File.expand_path('../src/chef_ci_status.rb', __dir__)} --config /nonexistent/path.yml --help`
+    output = `ruby #{File.expand_path('../src/chef_ci_status.rb', __dir__)} --config /nonexistent/path.yml --dry-run 2>&1`
     
     # Verify the output contains default values
     assert_match(/Warning: Config file \/nonexistent\/path.yml not found/, output,
                  "Missing warning about non-existent config file")
-    assert_match(/--org ORG\s+GitHub org name \(default: chef\)/, output,
-                 "Default org not used as fallback")
+    
+    # Check default org is used
+    assert_match(/\[DRY RUN\] Would analyze \[chef\/chef\]/, output,
+                 "Default org/repo not used as fallback")
   end
   
   def test_partial_configuration
@@ -73,7 +74,8 @@ class ConfigLoadingTest < Minitest::Test
     partial_config.close
     
     # We use --verbose to see the options hash directly
-    output = `ruby #{File.expand_path('../src/chef_ci_status.rb', __dir__)} --config #{partial_config.path} --verbose 2>&1 || echo "Error execution returned non-zero"`
+    # Add --dry-run to skip GitHub API calls
+    output = `ruby #{File.expand_path('../src/chef_ci_status.rb', __dir__)} --config #{partial_config.path} --verbose --dry-run 2>&1`
     
     # Test that config loaded successfully
     assert_match(/Loaded custom configuration from/, output,
@@ -105,14 +107,14 @@ class ConfigLoadingTest < Minitest::Test
     YAML
     malformed_config.close
     
-    output = `ruby #{File.expand_path('../src/chef_ci_status.rb', __dir__)} --config #{malformed_config.path} --help`
+    output = `ruby #{File.expand_path('../src/chef_ci_status.rb', __dir__)} --config #{malformed_config.path} --dry-run 2>&1`
     
     # Should report error loading malformed config
     assert_match(/Error loading custom configuration/, output,
                "Missing error for malformed YAML")
     
     # Should fall back to defaults
-    assert_match(/--org ORG\s+GitHub org name \(default: chef\)/, output,
+    assert_match(/\[DRY RUN\] Would analyze \[chef\/chef\]/, output,
                "Not falling back to defaults with malformed config")
     
     malformed_config.unlink
@@ -189,6 +191,63 @@ class ConfigLoadingTest < Minitest::Test
     override_config.unlink
   end
   
+  def test_ci_timeout_option
+    # Test the new ci_timeout option
+    timeout_config = Tempfile.new(['timeout_test', '.yml'])
+    timeout_config.write(<<~YAML)
+      default_org: 'timeout-org'
+      default_repo: 'timeout-repo'
+      default_days: 10
+      default_mode: 'all'
+      ci_timeout: 120  # Set a custom CI timeout in config
+    YAML
+    timeout_config.close
+    
+    # Add --dry-run to skip actual GitHub API calls
+    output = `ruby #{File.expand_path('../src/chef_ci_status.rb', __dir__)} --config #{timeout_config.path} --verbose --dry-run 2>&1`
+    
+    # Check that the custom CI timeout was loaded from config
+    assert_match(/Options: {.*:ci_timeout=>120.*}/, output,
+                "Custom CI timeout not loaded from config")
+    
+    # Test CLI option overrides config
+    output_cli = `ruby #{File.expand_path('../src/chef_ci_status.rb', __dir__)} --config #{timeout_config.path} --ci-timeout 60 --verbose --dry-run 2>&1`
+    
+    # CLI should override config
+    assert_match(/Options: {.*:ci_timeout=>60.*}/, output_cli,
+                "CLI --ci-timeout not overriding config value")
+    
+    timeout_config.unlink
+  end
+  
+  def test_skip_ci_option
+    # Test the --skip-ci option
+    output = `ruby #{File.expand_path('../src/chef_ci_status.rb', __dir__)} --skip-ci --verbose --dry-run 2>&1`
+    
+    # Check that CI mode is not in the modes array
+    refute_match(/:mode=>\["ci"/, output,
+                "--skip-ci not removing ci from modes")
+    refute_match(/:mode=>\["all"/, output,
+                "--skip-ci not processing all mode correctly")
+    
+    # Should still include pr and issue
+    assert_match(/:mode=>\["pr", "issue"\]/, output,
+                "PR and Issue modes not included with --skip-ci")
+  end
+  
+  def test_dry_run_option
+    # Test the --dry-run option
+    output = `ruby #{File.expand_path('../src/chef_ci_status.rb', __dir__)} --dry-run --verbose 2>&1`
+    
+    # Check that dry run is set
+    assert_match(/Options: {.*:dry_run=>true.*}/, output,
+                "--dry-run not setting dry_run option")
+                
+    # Should show dry run message
+    assert_match(/\[DRY RUN\] Would analyze/, output,
+                "Dry run message not displayed")
+  end
+  
   def test_config_merging_behavior
     # Test that the config system properly merges configuration from multiple sources
     # in the right priority order: CLI args > --config file > Settings > hardcoded defaults
@@ -202,6 +261,7 @@ class ConfigLoadingTest < Minitest::Test
       default_branches:
         - 'merge-branch'
       default_mode: 'pr'
+      ci_timeout: 90  # Custom CI timeout
     YAML
     merge_config.close
     
@@ -223,7 +283,7 @@ class ConfigLoadingTest < Minitest::Test
     
     begin
       # Test with CLI args to override day value
-      cli_output = `ruby #{File.expand_path('../src/chef_ci_status.rb', __dir__)} --config #{merge_config.path} --days 3 --verbose 2>&1 || echo "Error execution returned non-zero"`
+      cli_output = `ruby #{File.expand_path('../src/chef_ci_status.rb', __dir__)} --config #{merge_config.path} --days 3 --verbose --dry-run 2>&1`
       
       # Verify config was loaded
       assert_match(/Loaded custom configuration from/, cli_output,

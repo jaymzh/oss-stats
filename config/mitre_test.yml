@@ -1,0 +1,18 @@
+# Custom configuration for testing with MITRE organization
+default_org: "mitre"
+default_repo: "saf"
+default_branches:
+  - "main"
+default_days: 30
+default_mode: "all"
+ci_timeout: 60  # Shorter timeout for testing
+
+# Organization configuration section
+organizations:
+  mitre:
+    name: "MITRE Corporation"
+    repositories:
+      - name: "saf"
+        branches: ["main"]
+      - name: "inspec_tools"
+        branches: ["master"]

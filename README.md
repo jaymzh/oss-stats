@@ -38,6 +38,7 @@ default_branches:               # Default branches to analyze
   - "main"
 default_days: 30                # Default number of days to look back
 default_mode: "all"             # Default mode (ci, pr, issue, or all)
+ci_timeout: 180                 # Timeout for CI processing in seconds (default: 180)
 
 # Organization configuration section
 organizations:
@@ -106,6 +107,39 @@ Code quality is maintained using Cookstyle (RuboCop):
 ```shell
 # Run linting
 bundle exec cookstyle
+```
+
+## Command Options
+
+The script supports several command-line options:
+
+```
+--config CONFIG_FILE      Path to custom configuration file
+--org ORG                 GitHub organization name
+--repo REPO               GitHub repository name
+--branches BRANCHES       Comma-separated list of branches
+--days DAYS               Number of days to analyze
+--mode MODE               Comma-separated list of modes: ci,pr,issue,all
+--ci-timeout SECONDS      Timeout for CI processing in seconds
+--skip-ci                 Skip CI status processing (faster)
+--dry-run                 Skip all GitHub API calls (for testing)
+-v, --verbose             Enable verbose output
+```
+
+### Authentication
+
+The script requires a GitHub token for authentication. It will be obtained in the following order:
+1. From the `GITHUB_TOKEN` environment variable
+2. From the GitHub CLI configuration
+3. By running `gh auth token` if GitHub CLI is available
+
+Example:
+```bash
+# Using environment variable
+GITHUB_TOKEN=your_token ./src/chef_ci_status.rb --config config/my_config.yml
+
+# Using GitHub CLI (if authenticated)
+./src/chef_ci_status.rb --config config/my_config.yml
 ```
 
 ## Build Status

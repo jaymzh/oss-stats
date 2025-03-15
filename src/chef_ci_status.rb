@@ -14,13 +14,27 @@ rescue LoadError => e
   puts 'Using hardcoded defaults.'
 end
 
-# Get GitHub token
+# Get GitHub token from environment or GitHub CLI config
 def get_github_token
+  # First check if token is provided via environment variable
+  return ENV['GITHUB_TOKEN'] if ENV['GITHUB_TOKEN']
+  
+  # Then try to get from GitHub CLI config
   config_path = File.expand_path('~/.config/gh/hosts.yml')
   if File.exist?(config_path)
     config = YAML.load_file(config_path)
-    return config.dig('github.com', 'oauth_token')
+    token = config.dig('github.com', 'oauth_token')
+    return token if token
   end
+  
+  # Finally, try to use gh CLI directly to get token
+  begin
+    gh_token = `gh auth token 2>/dev/null`.strip
+    return gh_token unless gh_token.empty?
+  rescue StandardError => e
+    puts "Warning: Failed to get token from gh CLI: #{e.message}" if ENV['VERBOSE']
+  end
+  
   nil
 end
 
@@ -109,75 +123,135 @@ def get_failed_tests_from_ci(client, options)
   cutoff_date = Date.today - options[:days]
   today = Date.today
   failed_tests = {}
+  start_time = Time.now
+  max_ci_processing_time = options[:ci_timeout] || 180 # Default timeout: 3 minutes
+  
+  puts "Starting CI processing for #{repo} (timeout: #{max_ci_processing_time}s)" if options[:verbose]
+  
   options[:branches].each do |b|
     failed_tests[b] = {}
   end
 
   options[:branches].each do |branch|
     puts "Checking workflow runs for branch: #{branch}" if options[:verbose]
+    
+    begin
+      workflows_response = client.workflows(repo)
+      puts "  Found #{workflows_response.workflows.count} workflows" if options[:verbose]
+      
+      workflows_response.workflows.each do |workflow|
+        # Check if we've exceeded our timeout
+        if Time.now - start_time > max_ci_processing_time
+          puts "CI processing timeout reached (#{max_ci_processing_time}s). Returning partial results." if options[:verbose]
+          return failed_tests
+        end
+        
+        puts "  Workflow: #{workflow.name} (ID: #{workflow.id})" if options[:verbose]
+        workflow_runs = []
+        page = 1
+        
+        begin
+          loop do
+            puts "    Acquiring page #{page} of workflow runs" if options[:verbose]
+            runs = client.workflow_runs(repo, workflow.id, branch:,
+                    status: 'completed', per_page: 100, page:)
+            
+            puts "    Retrieved #{runs.workflow_runs.count} runs on page #{page}" if options[:verbose]
+            break if runs.workflow_runs.empty?
 
-    workflows = client.workflows(repo).workflows
-    workflows.each do |workflow|
-      puts "Workflow: #{workflow.name}" if options[:verbose]
-      workflow_runs = []
-      page = 1
-      loop do
-        puts "  Acquiring page #{page}" if options[:verbose]
-        runs = client.workflow_runs(repo, workflow.id, branch:,
-status: 'completed', per_page: 100, page:)
-        break if runs.workflow_runs.empty?
+            workflow_runs.concat(runs.workflow_runs)
+            
+            if !runs.workflow_runs.empty? && runs.workflow_runs.last.created_at.to_date < cutoff_date
+              puts "    Reached cutoff date (#{cutoff_date}), stopping pagination" if options[:verbose]
+              break
+            end
 
-        workflow_runs.concat(runs.workflow_runs)
-        break if runs.workflow_runs.last.created_at.to_date < cutoff_date
-
-        page += 1
-      end
-
-      workflow_runs.sort_by!(&:created_at)
-      last_failure_date = {}
-      workflow_runs.each do |run|
-        puts "  Looking at workflow run #{run.id}" if options[:verbose]
-        run_date = run.created_at.to_date
-        next if run_date < cutoff_date
-
-        jobs = client.workflow_run_jobs(repo, run.id).jobs
-        jobs.each do |job|
-          if options[:verbose]
-            puts "    Looking at job #{job.name} [#{job.conclusion}]"
-          end
-          if job.conclusion == 'failure'
-            failed_tests[branch][job.name] ||= Set.new
-          end
-          last_date = last_failure_date[job.name]
-
-          if last_date
-            while last_date < run_date
-              failed_tests[branch][job.name] << last_date
-              last_date += 1
+            page += 1
+            
+            # Check timeout after each page
+            if Time.now - start_time > max_ci_processing_time
+              puts "CI processing timeout reached (#{max_ci_processing_time}s). Returning partial results." if options[:verbose]
+              return failed_tests
             end
           end
-
-          if job.conclusion == 'failure'
-            failed_tests[branch][job.name] << run_date
-            last_failure_date[job.name] = run_date
-          elsif job.conclusion == 'success'
-            last_failure_date.delete(job.name)
-          end
+        rescue Octokit::NotFound => e
+          puts "    Error: Workflow runs not found - #{e.message}" if options[:verbose]
+          next
         rescue StandardError => e
-          puts "Error getting jobs for run #{run.id}: #{e}"
+          puts "    Error retrieving workflow runs: #{e.message}" if options[:verbose]
           next
         end
-      end
 
-      last_failure_date.each do |job_name, last_date|
-        while last_date < today
-          failed_tests[branch][job_name] << last_date
-          last_date += 1
+        puts "    Processing #{workflow_runs.count} workflow runs" if options[:verbose]
+        workflow_runs.sort_by!(&:created_at)
+        last_failure_date = {}
+        
+        workflow_runs.each do |run|
+          # Check timeout after each run
+          if Time.now - start_time > max_ci_processing_time
+            puts "CI processing timeout reached (#{max_ci_processing_time}s). Returning partial results." if options[:verbose]
+            return failed_tests
+          end
+          
+          puts "    Processing workflow run #{run.id} (#{run.created_at})" if options[:verbose]
+          run_date = run.created_at.to_date
+          next if run_date < cutoff_date
+
+          begin
+            jobs_response = client.workflow_run_jobs(repo, run.id)
+            jobs = jobs_response.jobs
+            puts "      Found #{jobs.count} jobs" if options[:verbose]
+            
+            jobs.each do |job|
+              if options[:verbose]
+                puts "      Job: #{job.name} [#{job.conclusion}]"
+              end
+              
+              if job.conclusion == 'failure'
+                failed_tests[branch][job.name] ||= Set.new
+              end
+              last_date = last_failure_date[job.name]
+
+              if last_date
+                while last_date < run_date
+                  failed_tests[branch][job.name] << last_date
+                  last_date += 1
+                end
+              end
+
+              if job.conclusion == 'failure'
+                failed_tests[branch][job.name] << run_date
+                last_failure_date[job.name] = run_date
+              elsif job.conclusion == 'success'
+                last_failure_date.delete(job.name)
+              end
+            end
+          rescue Octokit::NotFound => e
+            puts "      Error: Jobs not found for run #{run.id} - #{e.message}" if options[:verbose]
+            next
+          rescue StandardError => e
+            puts "      Error getting jobs for run #{run.id}: #{e.message}" if options[:verbose]
+            next
+          end
+        end
+
+        last_failure_date.each do |job_name, last_date|
+          while last_date < today
+            failed_tests[branch][job_name] << last_date
+            last_date += 1
+          end
         end
       end
+    rescue Octokit::NotFound => e
+      puts "  Error: Workflows not found - #{e.message}" if options[:verbose]
+      next
+    rescue StandardError => e
+      puts "  Error retrieving workflows: #{e.message}" if options[:verbose]
+      next
     end
   end
 
+  puts "CI processing completed in #{(Time.now - start_time).round(2)}s" if options[:verbose]
   failed_tests
 end
 
@@ -216,6 +290,7 @@ options = if defined?(Settings)
               days: Settings.default_days,
               verbose: false,
               mode: default_mode,
+              ci_timeout: 180, # Default: 3 minutes
             }
           else
             {
@@ -225,6 +300,7 @@ options = if defined?(Settings)
               days: 30,
               verbose: false,
               mode: ['all'],
+              ci_timeout: 180, # Default: 3 minutes
             }
           end
 
@@ -312,6 +388,28 @@ OptionParser.new do |opts|
   ) do
     options[:verbose] = true
   end
+  
+  opts.on(
+    '--ci-timeout SECONDS',
+    Integer,
+    "Timeout for CI processing in seconds (default: #{options[:ci_timeout]})",
+  ) do |v|
+    options[:ci_timeout] = v
+  end
+  
+  opts.on(
+    '--skip-ci',
+    'Skip CI status processing (faster)',
+  ) do
+    options[:mode].delete('ci')
+  end
+  
+  opts.on(
+    '--dry-run',
+    'Skip all GitHub API calls (for testing)',
+  ) do
+    options[:dry_run] = true
+  end
 end.parse!
 options[:mode] = %w{ci pr issue} if options[:mode].include?('all')
 
@@ -319,8 +417,26 @@ if options[:verbose]
   puts "Options: #{options}"
 end
 
+# Skip actual GitHub API calls in dry-run mode
+if options[:dry_run]
+  puts "[DRY RUN] Would analyze [#{options[:org]}/#{options[:repo]}] Stats (Last #{options[:days]} days)"
+  exit 0
+end
+
 github_token = get_github_token
-raise 'GitHub token not found in ~/.config/gh/hosts.yml' unless github_token
+unless github_token
+  raise <<~ERROR
+  GitHub token not found. Please authenticate using one of these methods:
+  
+  1. Set GITHUB_TOKEN environment variable:
+     GITHUB_TOKEN=your_token #{$PROGRAM_NAME} [options]
+     
+  2. Use GitHub CLI authentication:
+     gh auth login
+     
+  3. Use --dry-run option to skip GitHub API calls (for testing)
+  ERROR
+end
 
 client = Octokit::Client.new(access_token: github_token)
 
