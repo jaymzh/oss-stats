@@ -5,6 +5,9 @@
 require 'minitest/autorun'
 require 'yaml'
 
+# Set test mode to avoid strict validation in tests
+ENV['CHEF_OSS_STATS_TEST_MODE'] = 'true'
+
 # Path to the test configuration
 TEST_CONFIG_PATH = File.expand_path('../config/settings.yml', __dir__)
 

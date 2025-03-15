@@ -8,6 +8,36 @@ interact with Progress' development teams and repositories.
 
 Stats from this repo will (hopefully) be published in the weekly slack meetings.
 
+## Installation
+
+### Prerequisites
+
+- Ruby 2.7 or newer
+- Bundler gem
+- GitHub API access (token) for repository data
+
+### Setup
+
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/jaymzh/chef-oss-stats.git
+   cd chef-oss-stats
+   ```
+
+2. Install dependencies:
+   ```bash
+   bundle install
+   ```
+
+3. Configure GitHub access:
+   - Create a GitHub Personal Access Token with `repo` scope
+   - Set it as an environment variable: `export GITHUB_TOKEN=your_token_here`
+   - Alternatively, authenticate with GitHub CLI (`gh auth login`)
+
+4. Create or modify a configuration file (see [Configuration](#configuration) section)
+   - Use the examples in `examples/` directory as a starting point
+   - Copy and modify `examples/basic_config.yml` for a simple setup
+
 ## Configuration
 
 The chef-oss-stats tools can be configured through YAML configuration files.
@@ -25,6 +55,30 @@ bundle exec rake test
 # Run only configuration tests
 bundle exec rake test_config
 ```
+
+### Configuration Validation
+
+The configuration files are automatically validated against a schema when loaded. If there are configuration errors, they will be reported with specific error messages. You can control validation behavior with environment variables:
+
+- `CHEF_OSS_STATS_STRICT_CONFIG=true` - Exit with error code if configuration is invalid
+- `CHEF_OSS_STATS_IGNORE_CONFIG_ERRORS=true` - Continue despite configuration validation errors
+
+The validation ensures:
+- Required configuration keys are present
+- Values have the correct data types
+- Organization structure is properly defined
+- Repository references are valid
+
+#### Validating Your Configuration
+
+To validate your configuration without running the full application, use the included validation script:
+
+```shell
+# Validate a configuration file
+ruby examples/validate_config.rb path/to/your/config.yml
+```
+
+This tool will check your configuration file for syntax and schema errors before you use it with the main application.
 
 ### Configuration Schema
 
@@ -53,7 +107,13 @@ organizations:
 
 ### Custom Configuration File
 
-You can create your own configuration file and use it with the `--config` option:
+You can create your own configuration file and use it with the `--config` option. Several example configuration files are provided in the `examples/` directory:
+
+- `examples/minimal_config.yml` - Minimal configuration with basic settings
+- `examples/basic_config.yml` - Standard single-organization configuration
+- `examples/multi_org_config.yml` - Advanced multi-organization setup
+
+Here's a basic example:
 
 ```yaml
 # custom_config.yml
@@ -80,6 +140,8 @@ To use a custom configuration:
 ```shell
 $ ./src/chef_ci_status.rb --config path/to/your/config.yml
 ```
+
+You can also copy and modify the examples as a starting point for your own configuration.
 
 ## Development
 
@@ -109,7 +171,9 @@ Code quality is maintained using Cookstyle (RuboCop):
 bundle exec cookstyle
 ```
 
-## Command Options
+## Using the Tool
+
+### Command Options
 
 The script supports several command-line options:
 
@@ -140,6 +204,91 @@ GITHUB_TOKEN=your_token ./src/chef_ci_status.rb --config config/my_config.yml
 
 # Using GitHub CLI (if authenticated)
 ./src/chef_ci_status.rb --config config/my_config.yml
+```
+
+### Common Usage Examples
+
+Here are some common usage examples for the tool:
+
+#### Analyzing a Specific Repository
+
+To analyze a specific repository with default settings:
+
+```bash
+# Analyze chef/chef repository for the last 30 days
+./src/chef_ci_status.rb --org chef --repo chef
+```
+
+#### Customizing Time Range
+
+To analyze a different time period:
+
+```bash
+# Analyze chef/chef repository for the last 7 days
+./src/chef_ci_status.rb --org chef --repo chef --days 7
+
+# Analyze chef/chef repository for the last 90 days
+./src/chef_ci_status.rb --org chef --repo chef --days 90
+```
+
+#### Analyzing Multiple Branches
+
+To analyze multiple branches in a repository:
+
+```bash
+# Analyze main and develop branches
+./src/chef_ci_status.rb --org chef --repo chef --branches main,develop
+```
+
+#### Focusing on Specific Metrics
+
+To focus on particular metrics types:
+
+```bash
+# Only analyze PR stats
+./src/chef_ci_status.rb --org chef --repo chef --mode pr
+
+# Only analyze CI stats
+./src/chef_ci_status.rb --org chef --repo chef --mode ci
+
+# Analyze PR and Issue stats, but skip CI (faster)
+./src/chef_ci_status.rb --org chef --repo chef --mode pr,issue
+
+# Alternatively, use the --skip-ci flag
+./src/chef_ci_status.rb --org chef --repo chef --skip-ci
+```
+
+#### Using Custom Configuration
+
+To use a custom configuration file:
+
+```bash
+# Use a custom configuration file
+./src/chef_ci_status.rb --config examples/basic_config.yml
+
+# Override values from config file
+./src/chef_ci_status.rb --config examples/basic_config.yml --days 14 --branches main
+```
+
+#### Testing Without API Calls
+
+For testing or validating without making GitHub API calls:
+
+```bash
+# Dry run - no actual API calls will be made
+./src/chef_ci_status.rb --config examples/basic_config.yml --dry-run
+```
+
+#### Advanced Usage
+
+For CI performance tuning:
+
+```bash
+# Set a custom timeout for CI processing (in seconds)
+./src/chef_ci_status.rb --org chef --repo chef --ci-timeout 300
+
+# Get verbose output for debugging
+./src/chef_ci_status.rb --org chef --repo chef --verbose
 ```
 
 ## Build Status
@@ -184,6 +333,19 @@ The wrapper [run_weekly_ci_reports.sh](src/run_weekly_ci_reports.sh) loops
 over all the relevant repos and runs `chef-ci-status.rb`. This is intended
 for posting in the weekly Chef Community Slack meeting.
 
+To run the weekly reports:
+
+```bash
+# Generate weekly reports for all configured repositories
+./src/run_weekly_ci_reports.sh
+
+# Generate reports with a specific configuration file
+CHEF_OSS_STATS_CONFIG=/path/to/config.yml ./src/run_weekly_ci_reports.sh
+```
+
+The script will process all repositories defined in the configuration file and output
+formatted results suitable for sharing in meetings or reports.
+
 ## Slack Meeting Stats
 
 These are stats from the Slack meetings:
@@ -192,17 +354,70 @@ These are stats from the Slack meetings:
 Reports](images/build_status-small.png)
 
 A per-meeting table can be found in [Slack Status
-Tracking](team_slack_reports.md). This data is tracked in a sqlite database in
+Tracking](team_slack_reports.md). This data is tracked in a SQLite database in
 this repo which you can interact with via
-[slack_meeting_stats.rb](src/slack_meeting_stats.rb). See the help message for
-details.
+[slack_meeting_stats.rb](src/slack_meeting_stats.rb).
 
-To update the `team_slack_reports.md`, run run `slack_meeting_stats.rb --mode
-markdown`.
+### Using the Slack Stats Tool
 
-To update the stats for the week run `slack_meeting_stats.rb --mode record`.
+The slack_meeting_stats.rb script provides several modes for managing Slack meeting statistics:
 
-## Manual or semi-manual stats
+```bash
+# View help and available options
+ruby src/slack_meeting_stats.rb --help
 
-There are a variety fo miscelanious manual statistics which are gathered
-manually and recorded in [Misc stats](manual_stats/misc.md)
+# Record stats for the current week
+ruby src/slack_meeting_stats.rb --mode record
+
+# Generate markdown report
+ruby src/slack_meeting_stats.rb --mode markdown
+
+# Export data to CSV
+ruby src/slack_meeting_stats.rb --mode export --output-file stats.csv
+
+# Generate graphs for visualization
+ruby src/slack_meeting_stats.rb --mode graph
+```
+
+#### Recording Weekly Stats
+
+To record stats for a meeting:
+
+```bash
+# Interactive mode to record stats for the current week
+ruby src/slack_meeting_stats.rb --mode record
+
+# Record stats with specific values
+ruby src/slack_meeting_stats.rb --mode record --attendance 42 --build-status yes
+```
+
+#### Generating Reports
+
+To generate reports for inclusion in documentation, Slack posts, or other communications:
+
+```bash
+# Update the team_slack_reports.md file with latest stats
+ruby src/slack_meeting_stats.rb --mode markdown
+
+# Display stats for the last 10 weeks
+ruby src/slack_meeting_stats.rb --mode stats --weeks 10
+```
+
+## Manual or Semi-Manual Stats
+
+There are a variety of miscellaneous manual statistics which are gathered
+manually and recorded in [Misc stats](manual_stats/misc.md).
+
+## Future Enhancements
+
+See the [Enhancement Roadmap](ENHANCEMENT_ROADMAP.md) for details on planned improvements to this project.
+
+## Contributing
+
+Contributions to chef-oss-stats are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for details on the contribution process.
+
+All contributions must include a Developer Certificate of Origin (DCO) sign-off. This can be done by adding `-s` to your git commit command:
+
+```bash
+git commit -s -m "Your detailed commit message"
+```

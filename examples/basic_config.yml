@@ -1,0 +1,21 @@
+# Basic single-organization configuration example
+# This demonstrates the minimum required configuration
+
+# Default settings used when not specified in command line
+default_org: "my-org"
+default_repo: "my-repo"
+default_branches:
+  - "main"
+default_days: 30  # Number of days to look back for stats
+default_mode: "all"  # What types of stats to collect
+ci_timeout: 180  # Timeout for CI processing in seconds
+
+# Organization configuration
+organizations:
+  my-org:
+    name: "My Organization"
+    repositories:
+      - name: "my-repo"
+        branches: ["main"]
+      - name: "my-other-repo"
+        branches: ["main", "develop"]

@@ -1,0 +1,31 @@
+# Multi-organization configuration example
+# This demonstrates how to configure multiple organizations
+
+# Default settings used when not specified in command line
+default_org: "org-a"  # Default organization to use
+default_repo: "main-repo"
+default_branches:
+  - "main"
+default_days: 90  # Longer history period (90 days)
+default_mode: "all"
+ci_timeout: 300  # Longer timeout for CI processing (5 minutes)
+
+# Organization configuration
+organizations:
+  org-a:
+    name: "Organization A"
+    repositories:
+      - name: "main-repo"
+        branches: ["main", "develop"]
+      - name: "utils-repo"
+        branches: ["main"]
+      - name: "docs-repo"
+        branches: ["main"]
+
+  org-b:
+    name: "Organization B"
+    repositories:
+      - name: "project-x"
+        branches: ["master"]
+      - name: "project-y"
+        branches: ["master", "next"]

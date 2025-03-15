@@ -10,7 +10,12 @@ require 'set'
 begin
   require_relative '../config/initializers/config'
 rescue LoadError => e
-  puts "Warning: Configuration not loaded: #{e.message}"
+  puts "ERROR: Configuration system not loaded: #{e.message}"
+  puts "The config gem may not be installed. Run 'bundle install' to install dependencies."
+  puts 'Using hardcoded defaults.'
+rescue StandardError => e
+  puts "ERROR: Configuration failed to load: #{e.message}"
+  puts "Check your configuration files for syntax errors or missing required fields."
   puts 'Using hardcoded defaults.'
 end
 
@@ -316,21 +321,58 @@ OptionParser.new do |opts|
   ) do |v|
     if File.exist?(v)
       begin
-        custom_config = YAML.load_file(v)
+        # Load and parse the YAML file
+        custom_config = begin
+          YAML.load_file(v)
+        rescue Psych::SyntaxError => e
+          raise "Invalid YAML syntax in #{v}: #{e.message}"
+        end
+        
+        # Verify it's a hash/dictionary
+        if !custom_config.is_a?(Hash)
+          raise "Configuration file must contain a YAML dictionary/hash, not a #{custom_config.class}"
+        end
+        
+        # Basic validation of required configuration keys
+        required_keys = ['default_org', 'default_repo', 'default_branches', 'default_days']
+        missing_keys = required_keys.select { |key| !custom_config.key?(key) }
+        unless missing_keys.empty?
+          puts "Warning: Missing recommended keys in config file: #{missing_keys.join(', ')}"
+        end
         
         # Process all standard configuration keys
         if custom_config['default_org']
-          options[:org] = custom_config['default_org']
+          if custom_config['default_org'].is_a?(String)
+            options[:org] = custom_config['default_org']
+          else
+            puts "Warning: default_org must be a string, got #{custom_config['default_org'].class}"
+          end
         end
+        
         if custom_config['default_repo']
-          options[:repo] = custom_config['default_repo']
+          if custom_config['default_repo'].is_a?(String)
+            options[:repo] = custom_config['default_repo']
+          else
+            puts "Warning: default_repo must be a string, got #{custom_config['default_repo'].class}"
+          end
         end
+        
         if custom_config['default_branches']
-          options[:branches] = custom_config['default_branches']
+          if custom_config['default_branches'].is_a?(Array)
+            options[:branches] = custom_config['default_branches']
+          else
+            puts "Warning: default_branches must be an array, got #{custom_config['default_branches'].class}"
+          end
         end
+        
         if custom_config['default_days']
-          options[:days] = custom_config['default_days']
+          if custom_config['default_days'].is_a?(Numeric)
+            options[:days] = custom_config['default_days']
+          else
+            puts "Warning: default_days must be a number, got #{custom_config['default_days'].class}"
+          end
         end
+        
         if custom_config['default_mode']
           mode = custom_config['default_mode']
           options[:mode] = mode.is_a?(Array) ? mode : [mode]
@@ -338,15 +380,38 @@ OptionParser.new do |opts|
         
         # Process CI timeout configuration
         if custom_config['ci_timeout']
-          options[:ci_timeout] = custom_config['ci_timeout']
+          if custom_config['ci_timeout'].is_a?(Numeric)
+            options[:ci_timeout] = custom_config['ci_timeout']
+          else
+            puts "Warning: ci_timeout must be a number, got #{custom_config['ci_timeout'].class}"
+          end
+        end
+        
+        # Validate organizations if present
+        if custom_config['organizations']
+          if !custom_config['organizations'].is_a?(Hash)
+            puts "Warning: organizations must be a hash/dictionary"
+          else
+            # Check if specified default_org exists in organizations
+            if custom_config['default_org'] && 
+               !custom_config['organizations'].key?(custom_config['default_org'])
+              puts "Warning: default_org '#{custom_config['default_org']}' not found in organizations section"
+            end
+          end
         end
         
         puts "Loaded custom configuration from #{v}"
       rescue => e
-        puts "Error loading custom configuration: #{e.message}"
+        puts "ERROR: Failed to load custom configuration: #{e.message}"
+        puts "Using default settings instead."
+        puts "For configuration examples, see the examples/ directory."
+        exit(1) if ENV['CHEF_OSS_STATS_STRICT_CONFIG'] == 'true'
       end
     else
-      puts "Warning: Config file #{v} not found. Using default settings."
+      puts "ERROR: Config file '#{v}' not found."
+      puts "Please provide a valid path to a configuration file."
+      puts "For configuration examples, see the examples/ directory."
+      exit(1) if ENV['CHEF_OSS_STATS_STRICT_CONFIG'] == 'true'
     end
   end
 

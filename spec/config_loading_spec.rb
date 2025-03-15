@@ -5,6 +5,9 @@ require 'minitest/autorun'
 require 'yaml'
 require 'tempfile'
 
+# Set test mode to avoid strict validation in tests
+ENV['CHEF_OSS_STATS_TEST_MODE'] = 'true'
+
 # Add lib directory to load path
 $LOAD_PATH.unshift File.expand_path('../lib', __dir__)
 
@@ -53,9 +56,9 @@ class ConfigLoadingTest < Minitest::Test
     # We use a non-existent file path
     output = `ruby #{File.expand_path('../src/chef_ci_status.rb', __dir__)} --config /nonexistent/path.yml --dry-run 2>&1`
     
-    # Verify the output contains default values
-    assert_match(/Warning: Config file \/nonexistent\/path.yml not found/, output,
-                 "Missing warning about non-existent config file")
+    # Verify the output contains an error about the missing file
+    assert_match(/Config file.*not found/, output,
+                 "Missing error about non-existent config file")
     
     # Check default org is used
     assert_match(/\[DRY RUN\] Would analyze \[chef\/chef\]/, output,
@@ -110,8 +113,12 @@ class ConfigLoadingTest < Minitest::Test
     output = `ruby #{File.expand_path('../src/chef_ci_status.rb', __dir__)} --config #{malformed_config.path} --dry-run 2>&1`
     
     # Should report error loading malformed config
-    assert_match(/Error loading custom configuration/, output,
+    assert_match(/Failed to load custom configuration/, output,
                "Missing error for malformed YAML")
+    
+    # Should mention YAML syntax
+    assert_match(/syntax|parse/i, output,
+               "Error should mention YAML syntax problem")
     
     # Should fall back to defaults
     assert_match(/\[DRY RUN\] Would analyze \[chef\/chef\]/, output,

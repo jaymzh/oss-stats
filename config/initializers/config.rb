@@ -1,5 +1,6 @@
 # Config gem configuration
 require 'config'
+require_relative 'schema_validator'
 
 Config.setup do |config|
   # Name of the constant exposing loaded settings
@@ -22,4 +23,14 @@ Config.setup do |config|
     # Optional local settings file (for development/testing)
     File.join(File.dirname(__FILE__), '..', 'settings.local.yml'),
   )
+end
+
+# Validate configuration
+begin
+  SchemaValidator.validate!(Settings)
+rescue SchemaValidator::ConfigurationError => e
+  puts "ERROR: Configuration validation failed!"
+  puts e.message
+  exit(1) unless ENV['CHEF_OSS_STATS_IGNORE_CONFIG_ERRORS'] == 'true'
+  puts "Continuing despite errors due to CHEF_OSS_STATS_IGNORE_CONFIG_ERRORS=true"
 end

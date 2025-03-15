@@ -1,0 +1,17 @@
+# Minimal configuration example
+# Only includes the absolute minimum required settings
+
+# Default settings 
+default_org: "acme"
+default_repo: "product"
+default_branches:
+  - "main"
+default_days: 30
+
+# Single organization with a single repository
+organizations:
+  acme:
+    name: "ACME Corp"
+    repositories:
+      - name: "product"
+        branches: ["main"]
