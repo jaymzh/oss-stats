@@ -14,8 +14,6 @@ organizations:
     repositories:
       - name: "saf"
         branches: ["main"]
-      - name: "inspec_tools"
-        branches: ["master"]
       - name: "vulcan"
         branches: ["main"]
       - name: "heimdall2"
