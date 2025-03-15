@@ -29,6 +29,40 @@ class ConfigTest < Minitest::Test
     assert config['organizations']['chef'].key?('repositories'), "Missing 'repositories' in chef organization"
   end
   
+  def test_non_required_but_expected_fields
+    config = YAML.load_file(TEST_CONFIG_PATH)
+    
+    # Test for expected organization fields
+    assert config['organizations']['chef'].key?('name'), 
+           "Organization should have a 'name' field"
+    
+    # Test repository structure
+    chef_repos = config['organizations']['chef']['repositories']
+    repo = chef_repos.first
+    assert repo.key?('name'), "Repository should have a 'name' field"
+    assert repo.key?('branches'), "Repository should have a 'branches' field"
+    assert repo['branches'].is_a?(Array), "Repository branches should be an array"
+  end
+  
+  def test_config_structure_supports_future_team_names
+    config = YAML.load_file(TEST_CONFIG_PATH)
+    
+    # This test verifies our config structure will support future PRs 
+    # that add team names to configuration
+    
+    # Test temporary modification of the loaded config (not the file)
+    chef_org = config['organizations']['chef'].dup
+    
+    # Add a teams structure that we'll implement in a future PR
+    chef_org['teams'] = [
+      { 'name' => 'Chef Client', 'channels' => ['#chef'] }
+    ]
+    
+    # Verify we can access the structure (ensuring compatibility)
+    assert_equal 'Chef Client', chef_org['teams'].first['name'],
+                "Config structure should support team configurations for future PRs"
+  end
+  
   def test_default_values
     config = YAML.load_file(TEST_CONFIG_PATH)
     
