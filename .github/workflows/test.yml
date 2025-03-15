@@ -1,0 +1,37 @@
+name: Tests
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        ruby: [3.1, 3.3]  # Match the versions in the lint workflow
+    runs-on: ubuntu-latest
+    steps:
+    - name: Install system deps
+      run: |
+        sudo apt-get update
+        sudo apt-get -y install imagemagick libmagickwand-dev
+    - name: Checkout repository
+      uses: actions/checkout@v3
+    - name: Setup Ruby
+      uses: ruby/setup-ruby@v1
+      with:
+        ruby-version: ${{ matrix.ruby }}
+        bundler-cache: true
+    - name: Install dependencies
+      run: bundle install
+    - name: Run all tests
+      run: bundle exec rake test
+      env:
+        CHEF_OSS_STATS_TEST_MODE: true
+        CHEF_OSS_STATS_IGNORE_CONFIG_ERRORS: true
+    - name: Run config tests
+      run: bundle exec rake test_config
+      env:
+        CHEF_OSS_STATS_TEST_MODE: true
+        CHEF_OSS_STATS_IGNORE_CONFIG_ERRORS: true
