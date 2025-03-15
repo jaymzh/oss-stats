@@ -10,8 +10,8 @@ Stats from this repo will (hopefully) be published in the weekly slack meetings.
 
 ## Configuration
 
-The chef-oss-stats tools can be configured through YAML configuration files. 
-By default, the system uses the configuration in `config/settings.yml`, but you can 
+The chef-oss-stats tools can be configured through YAML configuration files.
+By default, the system uses the configuration in `config/settings.yml`, but you can
 provide custom configuration files using the `--config` option.
 
 ### Custom Configuration
