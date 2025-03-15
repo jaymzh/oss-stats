@@ -11,11 +11,13 @@ begin
   require_relative '../config/initializers/config'
 rescue LoadError => e
   puts "ERROR: Configuration system not loaded: #{e.message}"
-  puts "The config gem may not be installed. Run 'bundle install' to install dependencies."
+  puts "The config gem may not be installed." 
+  puts "Run 'bundle install' to install dependencies."
   puts 'Using hardcoded defaults.'
 rescue StandardError => e
   puts "ERROR: Configuration failed to load: #{e.message}"
-  puts 'Check your configuration files for syntax errors or missing required fields.'
+  puts 'Check your configuration files for syntax errors or' 
+  puts 'missing required fields.'
   puts 'Using hardcoded defaults.'
 end
 
@@ -37,7 +39,9 @@ def get_github_token
     gh_token = `gh auth token 2>/dev/null`.strip
     return gh_token unless gh_token.empty?
   rescue StandardError => e
-    puts "Warning: Failed to get token from gh CLI: #{e.message}" if ENV['VERBOSE']
+    if ENV['VERBOSE']
+      puts "Warning: Failed to get token from gh CLI: #{e.message}"
+    end
   end
 
   nil
@@ -129,45 +133,63 @@ def get_failed_tests_from_ci(client, options)
   today = Date.today
   failed_tests = {}
   start_time = Time.now
-  max_ci_processing_time = options[:ci_timeout] || 180 # Default timeout: 3 minutes
+  # Default timeout: 3 minutes
+  max_ci_processing_time = options[:ci_timeout] || 180
 
-  puts "Starting CI processing for #{repo} (timeout: #{max_ci_processing_time}s)" if options[:verbose]
+  if options[:verbose]
+    puts "Starting CI processing for #{repo} (timeout: #{max_ci_processing_time}s)"
+  end
 
   options[:branches].each do |b|
     failed_tests[b] = {}
   end
 
   options[:branches].each do |branch|
-    puts "Checking workflow runs for branch: #{branch}" if options[:verbose]
+    if options[:verbose]
+      puts "Checking workflow runs for branch: #{branch}"
+    end
 
     begin
       workflows_response = client.workflows(repo)
-      puts "  Found #{workflows_response.workflows.count} workflows" if options[:verbose]
+      if options[:verbose]
+        puts "  Found #{workflows_response.workflows.count} workflows"
+      end
 
       workflows_response.workflows.each do |workflow|
         # Check if we've exceeded our timeout
         if Time.now - start_time > max_ci_processing_time
-          puts "CI processing timeout reached (#{max_ci_processing_time}s). Returning partial results." if options[:verbose]
+          if options[:verbose]
+            puts "CI processing timeout reached (#{max_ci_processing_time}s). " \
+                 "Returning partial results."
+          end
           return failed_tests
         end
 
-        puts "  Workflow: #{workflow.name} (ID: #{workflow.id})" if options[:verbose]
+        if options[:verbose]
+          puts "  Workflow: #{workflow.name} (ID: #{workflow.id})"
+        end
         workflow_runs = []
         page = 1
 
         begin
           loop do
-            puts "    Acquiring page #{page} of workflow runs" if options[:verbose]
+            if options[:verbose]
+              puts "    Acquiring page #{page} of workflow runs"
+            end
             runs = client.workflow_runs(repo, workflow.id, branch:,
                     status: 'completed', per_page: 100, page:)
 
-            puts "    Retrieved #{runs.workflow_runs.count} runs on page #{page}" if options[:verbose]
+            if options[:verbose]
+              puts "    Retrieved #{runs.workflow_runs.count} runs on page #{page}"
+            end
             break if runs.workflow_runs.empty?
 
             workflow_runs.concat(runs.workflow_runs)
 
             if !runs.workflow_runs.empty? && runs.workflow_runs.last.created_at.to_date < cutoff_date
-              puts "    Reached cutoff date (#{cutoff_date}), stopping pagination" if options[:verbose]
+              if options[:verbose]
+                puts "    Reached cutoff date (#{cutoff_date}), stopping pagination"
+              end
               break
             end
 
@@ -175,30 +197,44 @@ def get_failed_tests_from_ci(client, options)
 
             # Check timeout after each page
             if Time.now - start_time > max_ci_processing_time
-              puts "CI processing timeout reached (#{max_ci_processing_time}s). Returning partial results." if options[:verbose]
+              if options[:verbose]
+                puts "CI processing timeout reached (#{max_ci_processing_time}s). " \
+                     "Returning partial results."
+              end
               return failed_tests
             end
           end
         rescue Octokit::NotFound => e
-          puts "    Error: Workflow runs not found - #{e.message}" if options[:verbose]
+          if options[:verbose]
+            puts "    Error: Workflow runs not found - #{e.message}"
+          end
           next
         rescue StandardError => e
-          puts "    Error retrieving workflow runs: #{e.message}" if options[:verbose]
+          if options[:verbose]
+            puts "    Error retrieving workflow runs: #{e.message}"
+          end
           next
         end
 
-        puts "    Processing #{workflow_runs.count} workflow runs" if options[:verbose]
+        if options[:verbose]
+          puts "    Processing #{workflow_runs.count} workflow runs"
+        end
         workflow_runs.sort_by!(&:created_at)
         last_failure_date = {}
 
         workflow_runs.each do |run|
           # Check timeout after each run
           if Time.now - start_time > max_ci_processing_time
-            puts "CI processing timeout reached (#{max_ci_processing_time}s). Returning partial results." if options[:verbose]
+            if options[:verbose]
+              puts "CI processing timeout reached (#{max_ci_processing_time}s). " \
+                   "Returning partial results."
+            end
             return failed_tests
           end
 
-          puts "    Processing workflow run #{run.id} (#{run.created_at})" if options[:verbose]
+          if options[:verbose]
+            puts "    Processing workflow run #{run.id} (#{run.created_at})"
+          end
           run_date = run.created_at.to_date
           next if run_date < cutoff_date
 
@@ -256,7 +292,9 @@ def get_failed_tests_from_ci(client, options)
     end
   end
 
-  puts "CI processing completed in #{(Time.now - start_time).round(2)}s" if options[:verbose]
+  if options[:verbose]
+    puts "CI processing completed in #{(Time.now - start_time).round(2)}s"
+  end
   failed_tests
 end
 
