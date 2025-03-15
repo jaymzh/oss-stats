@@ -6,6 +6,14 @@ require 'yaml'
 require 'octokit'
 require 'set'
 
+# Load configuration
+begin
+  require_relative '../config/initializers/config'
+rescue LoadError => e
+  puts "Warning: Configuration not loaded: #{e.message}"
+  puts 'Using hardcoded defaults.'
+end
+
 # Get GitHub token
 def get_github_token
   config_path = File.expand_path('~/.config/gh/hosts.yml')
@@ -194,18 +202,63 @@ def print_pr_or_issue_stats(stats, item)
   puts "    Avg Time to Close #{item_plural}: #{avg_time_str}"
 end
 
-options = {
-  org: 'chef',
-  repo: 'chef',
-  branches: ['main'],
-  days: 30,
-  verbose: false,
-  mode: ['all'],
-}
+# Define defaults from config or use hardcoded values
+options = if defined?(Settings)
+            default_mode = if Settings.default_mode.is_a?(Array)
+                             Settings.default_mode
+                           else
+                             [Settings.default_mode]
+                           end
+            {
+              org: Settings.default_org,
+              repo: Settings.default_repo,
+              branches: Settings.default_branches,
+              days: Settings.default_days,
+              verbose: false,
+              mode: default_mode,
+            }
+          else
+            {
+              org: 'chef',
+              repo: 'chef',
+              branches: ['main'],
+              days: 30,
+              verbose: false,
+              mode: ['all'],
+            }
+          end
 
 valid_modes = %w{ci pr issue all}
 OptionParser.new do |opts|
   opts.banner = 'Usage: chef_ci_status.rb [options]'
+
+  opts.on(
+    '--config CONFIG_FILE',
+    'Path to custom configuration file',
+  ) do |v|
+    if File.exist?(v)
+      begin
+        custom_config = YAML.load_file(v)
+        if custom_config['default_org']
+          options[:org] = custom_config['default_org']
+        end
+        if custom_config['default_repo']
+          options[:repo] = custom_config['default_repo']
+        end
+        if custom_config['default_branches']
+          options[:branches] = custom_config['default_branches']
+        end
+        if custom_config['default_days']
+          options[:days] = custom_config['default_days']
+        end
+        puts "Loaded custom configuration from #{v}"
+      rescue => e
+        puts "Error loading custom configuration: #{e.message}"
+      end
+    else
+      puts "Warning: Config file #{v} not found. Using default settings."
+    end
+  end
 
   opts.on(
     '--org ORG',

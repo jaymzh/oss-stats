@@ -4,6 +4,7 @@ gem 'sqlite3'
 gem 'octokit'
 gem 'faraday-retry'
 gem 'gruff'
+gem 'config'
 
 group(:development) do
   # for cookstyle

@@ -8,6 +8,42 @@ interact with Progress' development teams and repositories.
 
 Stats from this repo will (hopefully) be published in the weekly slack meetings.
 
+## Configuration
+
+The chef-oss-stats tools can be configured through YAML configuration files. 
+By default, the system uses the configuration in `config/settings.yml`, but you can 
+provide custom configuration files using the `--config` option.
+
+### Custom Configuration
+
+You can create your own configuration file with the following structure:
+
+```yaml
+# config/settings.yml or your custom file
+default_org: "your-org"
+default_repo: "your-repo"
+default_branches: 
+  - "main"
+default_days: 30
+default_mode: "all"
+
+# Organization configuration section
+organizations:
+  your-org:
+    name: "Your Organization"
+    repositories:
+      - name: "repo1"
+        branches: ["main"]
+      - name: "repo2"
+        branches: ["main", "develop"]
+```
+
+To use a custom configuration:
+
+```shell
+$ ./src/chef_ci_status.rb --config path/to/your/config.yml
+```
+
 ## Build Status
 
 The [chef_ci_status.rb](src/chef_ci_status.rb) script will walk GitHub CI

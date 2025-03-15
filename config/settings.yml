@@ -1,0 +1,20 @@
+# Default configuration for chef-oss-stats
+# This file contains the default values used when no custom configuration is provided.
+
+default_org: "chef"
+default_repo: "chef"
+default_branches: 
+  - "main"
+default_days: 30
+default_mode: "all"
+
+# Organization configuration section
+# This will be expanded in future PRs to include all organizations and repositories
+organizations:
+  chef:
+    name: "Chef"
+    repositories:
+      - name: "chef"
+        branches: ["main"]
+      - name: "ohai"
+        branches: ["main", "chef18"]
