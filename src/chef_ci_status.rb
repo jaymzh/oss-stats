@@ -15,7 +15,7 @@ rescue LoadError => e
   puts 'Using hardcoded defaults.'
 rescue StandardError => e
   puts "ERROR: Configuration failed to load: #{e.message}"
-  puts "Check your configuration files for syntax errors or missing required fields."
+  puts 'Check your configuration files for syntax errors or missing required fields.'
   puts 'Using hardcoded defaults.'
 end
 
@@ -23,7 +23,7 @@ end
 def get_github_token
   # First check if token is provided via environment variable
   return ENV['GITHUB_TOKEN'] if ENV['GITHUB_TOKEN']
-  
+
   # Then try to get from GitHub CLI config
   config_path = File.expand_path('~/.config/gh/hosts.yml')
   if File.exist?(config_path)
@@ -31,7 +31,7 @@ def get_github_token
     token = config.dig('github.com', 'oauth_token')
     return token if token
   end
-  
+
   # Finally, try to use gh CLI directly to get token
   begin
     gh_token = `gh auth token 2>/dev/null`.strip
@@ -39,7 +39,7 @@ def get_github_token
   rescue StandardError => e
     puts "Warning: Failed to get token from gh CLI: #{e.message}" if ENV['VERBOSE']
   end
-  
+
   nil
 end
 
@@ -130,49 +130,49 @@ def get_failed_tests_from_ci(client, options)
   failed_tests = {}
   start_time = Time.now
   max_ci_processing_time = options[:ci_timeout] || 180 # Default timeout: 3 minutes
-  
+
   puts "Starting CI processing for #{repo} (timeout: #{max_ci_processing_time}s)" if options[:verbose]
-  
+
   options[:branches].each do |b|
     failed_tests[b] = {}
   end
 
   options[:branches].each do |branch|
     puts "Checking workflow runs for branch: #{branch}" if options[:verbose]
-    
+
     begin
       workflows_response = client.workflows(repo)
       puts "  Found #{workflows_response.workflows.count} workflows" if options[:verbose]
-      
+
       workflows_response.workflows.each do |workflow|
         # Check if we've exceeded our timeout
         if Time.now - start_time > max_ci_processing_time
           puts "CI processing timeout reached (#{max_ci_processing_time}s). Returning partial results." if options[:verbose]
           return failed_tests
         end
-        
+
         puts "  Workflow: #{workflow.name} (ID: #{workflow.id})" if options[:verbose]
         workflow_runs = []
         page = 1
-        
+
         begin
           loop do
             puts "    Acquiring page #{page} of workflow runs" if options[:verbose]
             runs = client.workflow_runs(repo, workflow.id, branch:,
                     status: 'completed', per_page: 100, page:)
-            
+
             puts "    Retrieved #{runs.workflow_runs.count} runs on page #{page}" if options[:verbose]
             break if runs.workflow_runs.empty?
 
             workflow_runs.concat(runs.workflow_runs)
-            
+
             if !runs.workflow_runs.empty? && runs.workflow_runs.last.created_at.to_date < cutoff_date
               puts "    Reached cutoff date (#{cutoff_date}), stopping pagination" if options[:verbose]
               break
             end
 
             page += 1
-            
+
             # Check timeout after each page
             if Time.now - start_time > max_ci_processing_time
               puts "CI processing timeout reached (#{max_ci_processing_time}s). Returning partial results." if options[:verbose]
@@ -190,14 +190,14 @@ def get_failed_tests_from_ci(client, options)
         puts "    Processing #{workflow_runs.count} workflow runs" if options[:verbose]
         workflow_runs.sort_by!(&:created_at)
         last_failure_date = {}
-        
+
         workflow_runs.each do |run|
           # Check timeout after each run
           if Time.now - start_time > max_ci_processing_time
             puts "CI processing timeout reached (#{max_ci_processing_time}s). Returning partial results." if options[:verbose]
             return failed_tests
           end
-          
+
           puts "    Processing workflow run #{run.id} (#{run.created_at})" if options[:verbose]
           run_date = run.created_at.to_date
           next if run_date < cutoff_date
@@ -206,12 +206,12 @@ def get_failed_tests_from_ci(client, options)
             jobs_response = client.workflow_run_jobs(repo, run.id)
             jobs = jobs_response.jobs
             puts "      Found #{jobs.count} jobs" if options[:verbose]
-            
+
             jobs.each do |job|
               if options[:verbose]
                 puts "      Job: #{job.name} [#{job.conclusion}]"
               end
-              
+
               if job.conclusion == 'failure'
                 failed_tests[branch][job.name] ||= Set.new
               end
@@ -297,7 +297,7 @@ options = if defined?(Settings)
               days: Settings.default_days,
               verbose: false,
               mode: default_mode,
-              ci_timeout: ci_timeout, # From config or default: 3 minutes
+              ci_timeout:, # From config or default: 3 minutes
             }
           else
             {
@@ -324,22 +324,23 @@ OptionParser.new do |opts|
         # Load and parse the YAML file
         custom_config = begin
           YAML.load_file(v)
-        rescue Psych::SyntaxError => e
-          raise "Invalid YAML syntax in #{v}: #{e.message}"
+                        rescue Psych::SyntaxError => e
+                          raise "Invalid YAML syntax in #{v}: #{e.message}"
         end
-        
+
         # Verify it's a hash/dictionary
-        if !custom_config.is_a?(Hash)
+        unless custom_config.is_a?(Hash)
           raise "Configuration file must contain a YAML dictionary/hash, not a #{custom_config.class}"
         end
-        
+
         # Basic validation of required configuration keys
-        required_keys = ['default_org', 'default_repo', 'default_branches', 'default_days']
+        required_keys = %w{default_org default_repo default_branches
+default_days}
         missing_keys = required_keys.select { |key| !custom_config.key?(key) }
         unless missing_keys.empty?
           puts "Warning: Missing recommended keys in config file: #{missing_keys.join(', ')}"
         end
-        
+
         # Process all standard configuration keys
         if custom_config['default_org']
           if custom_config['default_org'].is_a?(String)
@@ -348,7 +349,7 @@ OptionParser.new do |opts|
             puts "Warning: default_org must be a string, got #{custom_config['default_org'].class}"
           end
         end
-        
+
         if custom_config['default_repo']
           if custom_config['default_repo'].is_a?(String)
             options[:repo] = custom_config['default_repo']
@@ -356,7 +357,7 @@ OptionParser.new do |opts|
             puts "Warning: default_repo must be a string, got #{custom_config['default_repo'].class}"
           end
         end
-        
+
         if custom_config['default_branches']
           if custom_config['default_branches'].is_a?(Array)
             options[:branches] = custom_config['default_branches']
@@ -364,7 +365,7 @@ OptionParser.new do |opts|
             puts "Warning: default_branches must be an array, got #{custom_config['default_branches'].class}"
           end
         end
-        
+
         if custom_config['default_days']
           if custom_config['default_days'].is_a?(Numeric)
             options[:days] = custom_config['default_days']
@@ -372,12 +373,12 @@ OptionParser.new do |opts|
             puts "Warning: default_days must be a number, got #{custom_config['default_days'].class}"
           end
         end
-        
+
         if custom_config['default_mode']
           mode = custom_config['default_mode']
           options[:mode] = mode.is_a?(Array) ? mode : [mode]
         end
-        
+
         # Process CI timeout configuration
         if custom_config['ci_timeout']
           if custom_config['ci_timeout'].is_a?(Numeric)
@@ -386,31 +387,29 @@ OptionParser.new do |opts|
             puts "Warning: ci_timeout must be a number, got #{custom_config['ci_timeout'].class}"
           end
         end
-        
+
         # Validate organizations if present
         if custom_config['organizations']
           if !custom_config['organizations'].is_a?(Hash)
-            puts "Warning: organizations must be a hash/dictionary"
-          else
+            puts 'Warning: organizations must be a hash/dictionary'
+          elsif custom_config['default_org'] &&
+                !custom_config['organizations'].key?(custom_config['default_org'])
             # Check if specified default_org exists in organizations
-            if custom_config['default_org'] && 
-               !custom_config['organizations'].key?(custom_config['default_org'])
-              puts "Warning: default_org '#{custom_config['default_org']}' not found in organizations section"
-            end
+            puts "Warning: default_org '#{custom_config['default_org']}' not found in organizations section"
           end
         end
-        
+
         puts "Loaded custom configuration from #{v}"
       rescue => e
         puts "ERROR: Failed to load custom configuration: #{e.message}"
-        puts "Using default settings instead."
-        puts "For configuration examples, see the examples/ directory."
+        puts 'Using default settings instead.'
+        puts 'For configuration examples, see the examples/ directory.'
         exit(1) if ENV['CHEF_OSS_STATS_STRICT_CONFIG'] == 'true'
       end
     else
       puts "ERROR: Config file '#{v}' not found."
-      puts "Please provide a valid path to a configuration file."
-      puts "For configuration examples, see the examples/ directory."
+      puts 'Please provide a valid path to a configuration file.'
+      puts 'For configuration examples, see the examples/ directory.'
       exit(1) if ENV['CHEF_OSS_STATS_STRICT_CONFIG'] == 'true'
     end
   end
@@ -467,7 +466,7 @@ OptionParser.new do |opts|
   ) do
     options[:verbose] = true
   end
-  
+
   opts.on(
     '--ci-timeout SECONDS',
     Integer,
@@ -475,17 +474,19 @@ OptionParser.new do |opts|
   ) do |v|
     options[:ci_timeout] = v
   end
-  
+
   opts.on(
     '--skip-ci',
     'Skip CI status processing (faster)',
   ) do
     # Remove 'ci' from any mode array
-    options[:mode] = options[:mode].reject { |m| m == 'ci' } if options[:mode].is_a?(Array)
+    options[:mode] = options[:mode].reject do |m|
+      m == 'ci'
+    end if options[:mode].is_a?(Array)
     # Also handle 'all' mode
     options[:mode] = %w{pr issue} if options[:mode].include?('all')
   end
-  
+
   opts.on(
     '--dry-run',
     'Skip all GitHub API calls (for testing)',
@@ -509,13 +510,13 @@ github_token = get_github_token
 unless github_token
   raise <<~ERROR
   GitHub token not found. Please authenticate using one of these methods:
-  
+
   1. Set GITHUB_TOKEN environment variable:
      GITHUB_TOKEN=your_token #{$PROGRAM_NAME} [options]
-     
+  #{'   '}
   2. Use GitHub CLI authentication:
      gh auth login
-     
+  #{'   '}
   3. Use --dry-run option to skip GitHub API calls (for testing)
   ERROR
 end

@@ -26,18 +26,18 @@ class ConfigValidationTest < Minitest::Test
           'repositories' => [
             {
               'name' => 'test-repo',
-              'branches' => ['main']
-            }
-          ]
-        }
-      }
+              'branches' => ['main'],
+            },
+          ],
+        },
+      },
     }
   end
 
   def test_valid_config_passes_validation
     # Test that a valid config passes validation
     errors = SchemaValidator.validate_config(@valid_config)
-    assert_empty errors, "Valid config should pass validation"
+    assert_empty errors, 'Valid config should pass validation'
   end
 
   def test_missing_required_keys
@@ -45,17 +45,17 @@ class ConfigValidationTest < Minitest::Test
     invalid_config = @valid_config.dup
     invalid_config.delete('default_org')
     invalid_config.delete('default_repo')
-    
+
     errors = SchemaValidator.validate_config(invalid_config)
-    refute_empty errors, "Missing required keys should fail validation"
-    
+    refute_empty errors, 'Missing required keys should fail validation'
+
     # Check specific error message
-    assert_match(/Missing required configuration keys/, errors.join(' '), 
-                "Should report missing required keys")
-    assert_match(/default_org/, errors.join(' '), 
-                "Should identify missing default_org")
-    assert_match(/default_repo/, errors.join(' '), 
-                "Should identify missing default_repo")
+    assert_match(/Missing required configuration keys/, errors.join(' '),
+                'Should report missing required keys')
+    assert_match(/default_org/, errors.join(' '),
+                'Should identify missing default_org')
+    assert_match(/default_repo/, errors.join(' '),
+                'Should identify missing default_repo')
   end
 
   def test_invalid_types
@@ -64,17 +64,17 @@ class ConfigValidationTest < Minitest::Test
     invalid_config['default_org'] = 123 # Should be a string
     invalid_config['default_days'] = 'thirty' # Should be a number
     invalid_config['default_branches'] = 'main' # Should be an array
-    
+
     errors = SchemaValidator.validate_config(invalid_config)
-    refute_empty errors, "Invalid types should fail validation"
-    
+    refute_empty errors, 'Invalid types should fail validation'
+
     # Check specific error messages
-    assert_match(/default_org must be a string/, errors.join(' '), 
-                "Should identify wrong type for default_org")
-    assert_match(/default_days must be a number/, errors.join(' '), 
-                "Should identify wrong type for default_days")
-    assert_match(/default_branches must be an array/, errors.join(' '), 
-                "Should identify wrong type for default_branches")
+    assert_match(/default_org must be a string/, errors.join(' '),
+                'Should identify wrong type for default_org')
+    assert_match(/default_days must be a number/, errors.join(' '),
+                'Should identify wrong type for default_days')
+    assert_match(/default_branches must be an array/, errors.join(' '),
+                'Should identify wrong type for default_branches')
   end
 
   def test_invalid_organization_structure
@@ -82,18 +82,19 @@ class ConfigValidationTest < Minitest::Test
     # So we'll temporarily unset the test mode to check organization validation
     old_test_mode = ENV['CHEF_OSS_STATS_TEST_MODE']
     ENV['CHEF_OSS_STATS_TEST_MODE'] = nil
-    
+
     begin
       # Test validation fails when organization structure is invalid
       invalid_config = @valid_config.dup
       invalid_config['organizations'] = 'not-a-hash'
-      
+
       errors = SchemaValidator.validate_config(invalid_config)
-      refute_empty errors, "Invalid organization structure should fail validation"
-      
+      refute_empty errors,
+'Invalid organization structure should fail validation'
+
       # Check specific error message
-      assert_match(/organizations must be a hash/, errors.join(' '), 
-                  "Should identify wrong type for organizations")
+      assert_match(/organizations must be a hash/, errors.join(' '),
+                  'Should identify wrong type for organizations')
     ensure
       # Restore test mode
       ENV['CHEF_OSS_STATS_TEST_MODE'] = old_test_mode
@@ -105,18 +106,19 @@ class ConfigValidationTest < Minitest::Test
     # So we'll temporarily unset the test mode
     old_test_mode = ENV['CHEF_OSS_STATS_TEST_MODE']
     ENV['CHEF_OSS_STATS_TEST_MODE'] = nil
-    
+
     begin
       # Test validation fails when repository structure is invalid
       invalid_config = @valid_config.dup
-      invalid_config['organizations']['test-org']['repositories'] = 'not-an-array'
-      
+      invalid_config['organizations']['test-org']['repositories'] =
+'not-an-array'
+
       errors = SchemaValidator.validate_config(invalid_config)
-      refute_empty errors, "Invalid repository structure should fail validation"
-      
+      refute_empty errors, 'Invalid repository structure should fail validation'
+
       # Check specific error message
-      assert_match(/repositories must be an array/, errors.join(' '), 
-                  "Should identify wrong type for repositories")
+      assert_match(/repositories must be an array/, errors.join(' '),
+                  'Should identify wrong type for repositories')
     ensure
       # Restore test mode
       ENV['CHEF_OSS_STATS_TEST_MODE'] = old_test_mode
@@ -128,23 +130,24 @@ class ConfigValidationTest < Minitest::Test
     # So we'll temporarily unset the test mode
     old_test_mode = ENV['CHEF_OSS_STATS_TEST_MODE']
     ENV['CHEF_OSS_STATS_TEST_MODE'] = nil
-    
+
     begin
       # Test validation fails when repository is missing required keys
       invalid_config = @valid_config.dup
       invalid_config['organizations']['test-org']['repositories'] = [
         {
           # Missing 'name' key
-          'branches' => ['main']
-        }
+          'branches' => ['main'],
+        },
       ]
-      
+
       errors = SchemaValidator.validate_config(invalid_config)
-      refute_empty errors, "Repository missing required keys should fail validation"
-      
+      refute_empty errors,
+'Repository missing required keys should fail validation'
+
       # Check specific error message
-      assert_match(/missing 'name'/, errors.join(' '), 
-                  "Should identify missing name in repository")
+      assert_match(/missing 'name'/, errors.join(' '),
+                  'Should identify missing name in repository')
     ensure
       # Restore test mode
       ENV['CHEF_OSS_STATS_TEST_MODE'] = old_test_mode
@@ -156,18 +159,19 @@ class ConfigValidationTest < Minitest::Test
     # So we'll temporarily unset the test mode
     old_test_mode = ENV['CHEF_OSS_STATS_TEST_MODE']
     ENV['CHEF_OSS_STATS_TEST_MODE'] = nil
-    
+
     begin
       # Test validation fails when branches is not an array
       invalid_config = @valid_config.dup
-      invalid_config['organizations']['test-org']['repositories'][0]['branches'] = 'main'
-      
+      invalid_config['organizations']['test-org']['repositories'][0]['branches'] =
+'main'
+
       errors = SchemaValidator.validate_config(invalid_config)
-      refute_empty errors, "Invalid branch structure should fail validation"
-      
+      refute_empty errors, 'Invalid branch structure should fail validation'
+
       # Check specific error message - the exact message might vary
-      assert_match(/branches must be an array|must be an array/, errors.join(' '), 
-                  "Should identify wrong type for branches")
+      assert_match(/branches must be an array|must be an array/, errors.join(' '),
+                  'Should identify wrong type for branches')
     ensure
       # Restore test mode
       ENV['CHEF_OSS_STATS_TEST_MODE'] = old_test_mode
@@ -177,17 +181,17 @@ class ConfigValidationTest < Minitest::Test
   def test_handles_nil_config
     # Test validation handles nil config
     errors = SchemaValidator.validate_config(nil)
-    refute_empty errors, "Nil config should fail validation"
-    
+    refute_empty errors, 'Nil config should fail validation'
+
     # Check specific error message
-    assert_match(/empty or not properly loaded/, errors.join(' '), 
-                "Should identify nil config")
+    assert_match(/empty or not properly loaded/, errors.join(' '),
+                'Should identify nil config')
   end
 
   def test_validate_bang_raises_error
     # Test that validate! raises an error on invalid config
     invalid_config = {}
-    
+
     assert_raises(SchemaValidator::ConfigurationError) do
       SchemaValidator.validate!(invalid_config)
     end

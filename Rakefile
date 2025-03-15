@@ -5,7 +5,7 @@ task :test do
   # Set environment variables for testing
   ENV['CHEF_OSS_STATS_TEST_MODE'] = 'true'
   ENV['CHEF_OSS_STATS_IGNORE_CONFIG_ERRORS'] = 'true'
-  
+
   # Run the actual tests
   Rake::Task['run_tests'].invoke
 end
@@ -15,7 +15,7 @@ task :test_config do
   # Set environment variables for testing
   ENV['CHEF_OSS_STATS_TEST_MODE'] = 'true'
   ENV['CHEF_OSS_STATS_IGNORE_CONFIG_ERRORS'] = 'true'
-  
+
   # Run the configuration tests
   Rake::Task['run_config_tests'].invoke
 end
