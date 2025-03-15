@@ -181,8 +181,10 @@ __dir__)} --config #{minimal_config.path} --verbose 2>&1 || echo "Error executio
     override_config.close
 
     # We'll pass command line args that override config values
-    output = `ruby #{File.expand_path('../src/chef_ci_status.rb',
-__dir__)} --config #{override_config.path} --org cli-org --repo cli-repo --verbose 2>&1 || echo "Error execution returned non-zero"`
+    cmd = "ruby #{File.expand_path('../src/chef_ci_status.rb', __dir__)} " \
+          "--config #{override_config.path} --org cli-org --repo cli-repo " \
+          "--verbose 2>&1 || echo 'Error execution returned non-zero'"
+    output = `#{cmd}`
 
     # Verify config was loaded
     assert_match(/Loaded custom configuration from/, output,
