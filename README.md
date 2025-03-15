@@ -14,12 +14,48 @@ The chef-oss-stats tools can be configured through YAML configuration files.
 By default, the system uses the configuration in `config/settings.yml`, but you can
 provide custom configuration files using the `--config` option.
 
-### Custom Configuration
+### Testing Configuration
 
-You can create your own configuration file with the following structure:
+The project includes tests for the configuration system. You can run these tests using:
+
+```shell
+# Run all tests
+bundle exec rake test
+
+# Run only configuration tests
+bundle exec rake test_config
+```
+
+### Configuration Schema
+
+The configuration uses the following schema:
 
 ```yaml
-# config/settings.yml or your custom file
+# Default values used when not provided via CLI arguments
+default_org: "your-org"         # Default GitHub organization
+default_repo: "your-repo"       # Default repository name
+default_branches:               # Default branches to analyze
+  - "main"
+default_days: 30                # Default number of days to look back
+default_mode: "all"             # Default mode (ci, pr, issue, or all)
+
+# Organization configuration section
+organizations:
+  your-org:                     # Organization key (should match default_org for default behavior)
+    name: "Your Organization"   # Human-readable organization name
+    repositories:               # List of repositories to analyze
+      - name: "repo1"           # Repository name
+        branches: ["main"]      # Branches to analyze for this repository
+      - name: "repo2"
+        branches: ["main", "develop"]
+```
+
+### Custom Configuration File
+
+You can create your own configuration file and use it with the `--config` option:
+
+```yaml
+# custom_config.yml
 default_org: "your-org"
 default_repo: "your-repo"
 default_branches: 
@@ -42,6 +78,34 @@ To use a custom configuration:
 
 ```shell
 $ ./src/chef_ci_status.rb --config path/to/your/config.yml
+```
+
+## Development
+
+### Testing
+
+The project uses [Minitest](https://github.com/seattlerb/minitest) for testing. Tests are organized in the `spec/` directory.
+
+To run the tests:
+
+```shell
+# Install dependencies
+bundle install
+
+# Run all tests
+bundle exec rake test
+
+# Run only configuration tests
+bundle exec rake test_config
+```
+
+### Linting
+
+Code quality is maintained using Cookstyle (RuboCop):
+
+```shell
+# Run linting
+bundle exec cookstyle
 ```
 
 ## Build Status
