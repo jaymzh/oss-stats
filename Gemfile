@@ -11,4 +11,6 @@ group(:development) do
   gem 'base64'
   gem 'cookstyle'
   gem 'mdl'
+  gem 'minitest'
+  gem 'rake'
 end

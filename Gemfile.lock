@@ -40,6 +40,7 @@ GEM
       mixlib-cli (~> 2.1, >= 2.1.1)
       mixlib-config (>= 2.2.1, < 4)
       mixlib-shellout
+    minitest (5.25.5)
     mixlib-cli (2.1.8)
     mixlib-config (3.0.27)
       tomlrb
@@ -60,6 +61,7 @@ GEM
     public_suffix (6.0.1)
     racc (1.8.1)
     rainbow (3.1.1)
+    rake (13.2.1)
     regexp_parser (2.10.0)
     rexml (3.4.1)
     rmagick (6.1.1)
@@ -113,7 +115,9 @@ DEPENDENCIES
   faraday-retry
   gruff
   mdl
+  minitest
   octokit
+  rake
   sqlite3
 
 BUNDLED WITH
