@@ -32,5 +32,6 @@ rescue SchemaValidator::ConfigurationError => e
   puts 'ERROR: Configuration validation failed!'
   puts e.message
   exit(1) unless ENV['CHEF_OSS_STATS_IGNORE_CONFIG_ERRORS'] == 'true'
-  puts 'Continuing despite errors due to CHEF_OSS_STATS_IGNORE_CONFIG_ERRORS=true'
+  # Flag allows continuing despite validation errors
+  puts 'Continuing despite configuration errors (ignore flag is set)'
 end

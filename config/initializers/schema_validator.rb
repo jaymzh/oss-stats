@@ -21,36 +21,46 @@ module SchemaValidator
       required_keys = %w{default_org default_repo default_branches default_days}
 
       # Only check for organizations if we're not in a test environment
-      required_keys << 'organizations' unless ENV['CHEF_OSS_STATS_TEST_MODE'] == 'true'
+      # Only require organizations in non-test mode
+      unless ENV['CHEF_OSS_STATS_TEST_MODE'] == 'true'
+        required_keys << 'organizations'
+      end
 
       missing_keys = required_keys.select { |key| !config.send(check_key, key) }
-      errors << "Missing required configuration keys: #{missing_keys.join(', ')}" unless missing_keys.empty?
+      unless missing_keys.empty?
+        errors << "Missing required configuration keys: " \
+                 "#{missing_keys.join(', ')}"
+      end
 
       # Type validation for core keys
       begin
-        errors << 'default_org must be a string' if config_has_key?(config,
-'default_org') &&
-                                                    !config_value(config,
-'default_org').is_a?(String)
+        # Validate default_org is a string if it exists
+        if config_has_key?(config, 'default_org') &&
+           !config_value(config, 'default_org').is_a?(String)
+          errors << 'default_org must be a string'
+        end
 
-        errors << 'default_repo must be a string' if config_has_key?(config,
-'default_repo') &&
-                                                     !config_value(config,
-'default_repo').is_a?(String)
+        # Validate default_repo is a string if it exists
+        if config_has_key?(config, 'default_repo') &&
+           !config_value(config, 'default_repo').is_a?(String)
+          errors << 'default_repo must be a string'
+        end
 
-        errors << 'default_branches must be an array' if config_has_key?(
-config, 'default_branches') &&
-                                                         !config_value(config,
-'default_branches').is_a?(Array)
+        # Validate default_branches is an array if it exists
+        if config_has_key?(config, 'default_branches') &&
+           !config_value(config, 'default_branches').is_a?(Array)
+          errors << 'default_branches must be an array'
+        end
 
-        errors << 'default_days must be a number' if config_has_key?(config,
-'default_days') &&
-                                                     !config_value(config,
-'default_days').is_a?(Numeric)
+        # Validate default_days is a number if it exists
+        if config_has_key?(config, 'default_days') &&
+           !config_value(config, 'default_days').is_a?(Numeric)
+          errors << 'default_days must be a number'
+        end
 
         # Only validate organizations in non-test mode
-        if config_has_key?(config,
-'organizations') && ENV['CHEF_OSS_STATS_TEST_MODE'] != 'true'
+        if config_has_key?(config, 'organizations') &&
+           ENV['CHEF_OSS_STATS_TEST_MODE'] != 'true'
           orgs = config_value(config, 'organizations')
 
           if !orgs.is_a?(Hash) && !orgs.respond_to?(:each)
@@ -61,26 +71,37 @@ config, 'default_branches') &&
               # Skip validation if org_data is not proper
               next if org_data.nil?
 
-              if !org_data.is_a?(Hash) && !org_data.respond_to?(:key?) && !org_data.respond_to?(:has_key?)
+              unless org_data.is_a?(Hash) || org_data.respond_to?(:key?) ||
+                     org_data.respond_to?(:has_key?)
                 errors << "Organization '#{org_key}' must be a hash/dictionary"
                 next
               end
 
               # Check for required organization keys using a more flexible approach
+              # Check if org has a name using the appropriate method
               has_name = if org_data.respond_to?(:key?)
                            org_data.key?('name')
+                         elsif org_data.respond_to?(:has_key?)
+                           org_data.key?('name')
                          else
-                           (org_data.respond_to?(:has_key?) ? org_data.has_key?('name') : false)
+                           false
                          end
 
+              # Check if org has repositories using the appropriate method
               has_repos = if org_data.respond_to?(:key?)
                             org_data.key?('repositories')
+                          elsif org_data.respond_to?(:has_key?)
+                            org_data.key?('repositories')
                           else
-                            (org_data.respond_to?(:has_key?) ? org_data.has_key?('repositories') : false)
+                            false
                           end
 
-              errors << "Organization '#{org_key}' is missing 'name'" unless has_name
-              errors << "Organization '#{org_key}' is missing 'repositories'" unless has_repos
+              unless has_name
+                errors << "Organization '#{org_key}' is missing 'name'"
+              end
+              unless has_repos
+                errors << "Organization '#{org_key}' is missing 'repositories'"
+              end
 
               # Skip further validation if repositories aren't present
               next unless has_repos
@@ -88,8 +109,8 @@ config, 'default_branches') &&
               # Get repositories collection using flexible approach
               repos = if org_data.respond_to?(:repositories)
                         org_data.repositories
-                      else
-                        (org_data.respond_to?(:[]) ? org_data['repositories'] : nil)
+                      elsif org_data.respond_to?(:[])
+                        org_data['repositories']
                       end
 
               next if repos.nil?
@@ -101,7 +122,8 @@ config, 'default_branches') &&
                 repos.each_with_index do |repo, index|
                   next if repo.nil?
 
-                  if !repo.is_a?(Hash) && !repo.respond_to?(:key?) && !repo.respond_to?(:has_key?)
+                  unless repo.is_a?(Hash) || repo.respond_to?(:key?) ||
+                         repo.respond_to?(:has_key?)
                     errors << "Repository ##{index + 1} in '#{org_key}' must be a hash/dictionary"
                     next
                   end
@@ -109,26 +131,30 @@ config, 'default_branches') &&
                   # Check for required repository keys using flexible approach
                   has_name = if repo.respond_to?(:key?)
                                repo.key?('name')
+                             elsif repo.respond_to?(:has_key?)
+                               repo.key?('name')
+                             elsif repo.respond_to?(:name)
+                               true
                              else
-                               (if repo.respond_to?(:has_key?)
-                                  repo.has_key?('name')
-                                else
-                                  (repo.respond_to?(:name) ? true : false)
-                                end)
+                               false
                              end
 
                   has_branches = if repo.respond_to?(:key?)
                                    repo.key?('branches')
+                                 elsif repo.respond_to?(:has_key?)
+                                   repo.key?('branches')
+                                 elsif repo.respond_to?(:branches)
+                                   true
                                  else
-                                   (if repo.respond_to?(:has_key?)
-                                      repo.has_key?('branches')
-                                    else
-                                      (repo.respond_to?(:branches) ? true : false)
-                                    end)
+                                   false
                                  end
 
-                  errors << "Repository ##{index + 1} in '#{org_key}' is missing 'name'" unless has_name
-                  errors << "Repository ##{index + 1} in '#{org_key}' is missing 'branches'" unless has_branches
+                  unless has_name
+                    errors << "Repository ##{index + 1} in '#{org_key}' is missing 'name'"
+                  end
+                  unless has_branches
+                    errors << "Repository ##{index + 1} in '#{org_key}' is missing 'branches'"
+                  end
 
                   # Skip branches validation if not present
                   next unless has_branches
@@ -136,8 +162,8 @@ config, 'default_branches') &&
                   # Get branches using flexible approach
                   branches = if repo.respond_to?(:branches)
                                repo.branches
-                             else
-                               (repo.respond_to?(:[]) ? repo['branches'] : nil)
+                             elsif repo.respond_to?(:[])
+                               repo['branches']
                              end
 
                   next if branches.nil?
@@ -145,10 +171,14 @@ config, 'default_branches') &&
                   next unless !branches.is_a?(Array) && !branches.respond_to?(:each)
                   repo_name = if repo.respond_to?(:name)
                                 repo.name
+                              elsif repo.respond_to?(:[])
+                                repo['name']
                               else
-                                (repo.respond_to?(:[]) ? repo['name'] : 'unnamed')
+                                'unnamed'
                               end
-                  errors << "Branches for repository '#{repo_name}' in '#{org_key}' must be an array"
+                  # Branches must be an array
+                  errors << "Branches for repository '#{repo_name}' " \
+                           "in '#{org_key}' must be an array"
                 end
               end
             end
@@ -171,7 +201,7 @@ config, 'default_branches') &&
     return false unless config
 
     if config.respond_to?(:has_key?)
-      config.has_key?(key)
+      config.key?(key)
     elsif config.respond_to?(:key?)
       config.key?(key)
     elsif config.respond_to?(key.to_sym)
