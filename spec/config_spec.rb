@@ -72,7 +72,7 @@ class ConfigTest < Minitest::Test
 
     # Verify we can access the structure (ensuring compatibility)
     assert_equal 'Chef Client', chef_org['teams'].first['name'],
-                'Config structure should support team configurations for future PRs'
+                'Config structure should support team configs for future PRs'
   end
 
   def test_default_values
@@ -82,7 +82,7 @@ class ConfigTest < Minitest::Test
     assert_equal 'chef', config['default_org'], 'Incorrect default_org value'
     assert_equal 'chef', config['default_repo'], 'Incorrect default_repo value'
     assert_includes config['default_branches'], 'main',
-"default_branches should include 'main'"
+                 "default_branches should include 'main'"
     assert_equal 30, config['default_days'], 'Incorrect default_days value'
     assert_equal 'all', config['default_mode'], 'Incorrect default_mode value'
   end

@@ -1,8 +1,7 @@
 #!/usr/bin/env ruby
 #
-# Configuration validation helper - EXAMPLE VERSION
-# NOTE: The main version of this script is now in scripts/validate_config.rb
-# Usage: ruby examples/validate_config.rb path/to/config.yml
+# Configuration validation helper
+# Usage: ruby scripts/validate_config.rb path/to/config.yml
 #
 
 require 'yaml'
@@ -18,7 +17,7 @@ config_file = ARGV[0]
 
 unless config_file
   puts 'ERROR: Please provide a configuration file path'
-  puts 'Usage: ruby examples/validate_config.rb path/to/config.yml'
+  puts 'Usage: ruby scripts/validate_config.rb path/to/config.yml'
   exit(1)
 end
 

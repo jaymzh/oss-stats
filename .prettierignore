@@ -1,0 +1,16 @@
+# Node modules and package files
+node_modules/
+package-lock.json
+package.json
+
+# Build directories
+vendor/
+lib/
+dist/
+
+# Ignore Claude's working files
+CLAUDE*.md
+SESSION*.md
+PR*.md
+
+# Anything in the .gitignore file

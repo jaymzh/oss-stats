@@ -11,12 +11,12 @@ begin
   require_relative '../config/initializers/config'
 rescue LoadError => e
   puts "ERROR: Configuration system not loaded: #{e.message}"
-  puts "The config gem may not be installed." 
+  puts 'The config gem may not be installed.'
   puts "Run 'bundle install' to install dependencies."
   puts 'Using hardcoded defaults.'
 rescue StandardError => e
   puts "ERROR: Configuration failed to load: #{e.message}"
-  puts 'Check your configuration files for syntax errors or' 
+  puts 'Check your configuration files for syntax errors or'
   puts 'missing required fields.'
   puts 'Using hardcoded defaults.'
 end
@@ -137,7 +137,8 @@ def get_failed_tests_from_ci(client, options)
   max_ci_processing_time = options[:ci_timeout] || 180
 
   if options[:verbose]
-    puts "Starting CI processing for #{repo} (timeout: #{max_ci_processing_time}s)"
+    puts "Starting CI processing for #{repo}" \
+         "(timeout: #{max_ci_processing_time}s)"
   end
 
   options[:branches].each do |b|
@@ -159,8 +160,8 @@ def get_failed_tests_from_ci(client, options)
         # Check if we've exceeded our timeout
         if Time.now - start_time > max_ci_processing_time
           if options[:verbose]
-            puts "CI processing timeout reached (#{max_ci_processing_time}s). " \
-                 "Returning partial results."
+            puts 'CI processing timeout reached' \
+                 "(#{max_ci_processing_time}s). Returning partial results."
           end
           return failed_tests
         end
@@ -180,15 +181,26 @@ def get_failed_tests_from_ci(client, options)
                     status: 'completed', per_page: 100, page:)
 
             if options[:verbose]
-              puts "    Retrieved #{runs.workflow_runs.count} runs on page #{page}"
+              count = runs.workflow_runs.count
+              puts "    Retrieved #{count} runs on page #{page}"
             end
             break if runs.workflow_runs.empty?
 
             workflow_runs.concat(runs.workflow_runs)
 
-            if !runs.workflow_runs.empty? && runs.workflow_runs.last.created_at.to_date < cutoff_date
+            # Check if we've reached the cutoff date
+            # Get date of the last run for cutoff comparison
+            is_empty = runs.workflow_runs.empty?
+            last_run_date = if is_empty
+                              nil
+                            else
+                              runs.workflow_runs.last.created_at.to_date
+                            end
+            if !runs.workflow_runs.empty? && last_run_date < cutoff_date
               if options[:verbose]
-                puts "    Reached cutoff date (#{cutoff_date}), stopping pagination"
+                date_str = cutoff_date.to_s
+                puts "    Reached cutoff date (#{date_str})," \
+                     'stopping pagination'
               end
               break
             end
@@ -196,13 +208,12 @@ def get_failed_tests_from_ci(client, options)
             page += 1
 
             # Check timeout after each page
-            if Time.now - start_time > max_ci_processing_time
-              if options[:verbose]
-                puts "CI processing timeout reached (#{max_ci_processing_time}s). " \
-                     "Returning partial results."
-              end
-              return failed_tests
+            next unless Time.now - start_time > max_ci_processing_time
+            if options[:verbose]
+              puts 'CI processing timeout reached' \
+                   "(#{max_ci_processing_time}s). Returning partial results."
             end
+            return failed_tests
           end
         rescue Octokit::NotFound => e
           if options[:verbose]
@@ -226,8 +237,8 @@ def get_failed_tests_from_ci(client, options)
           # Check timeout after each run
           if Time.now - start_time > max_ci_processing_time
             if options[:verbose]
-              puts "CI processing timeout reached (#{max_ci_processing_time}s). " \
-                   "Returning partial results."
+              puts 'CI processing timeout reached' \
+                   "(#{max_ci_processing_time}s). Returning partial results."
             end
             return failed_tests
           end
@@ -268,10 +279,15 @@ def get_failed_tests_from_ci(client, options)
               end
             end
           rescue Octokit::NotFound => e
-            puts "      Error: Jobs not found for run #{run.id} - #{e.message}" if options[:verbose]
+            if options[:verbose]
+              puts "      Error: Jobs not found for run #{run.id}" \
+                   "- #{e.message}"
+            end
             next
           rescue StandardError => e
-            puts "      Error getting jobs for run #{run.id}: #{e.message}" if options[:verbose]
+            if options[:verbose]
+              puts "      Error getting jobs for run #{run.id}: #{e.message}"
+            end
             next
           end
         end
@@ -326,8 +342,10 @@ options = if defined?(Settings)
                            else
                              [Settings.default_mode]
                            end
-            # Get CI timeout from config or use default
-            ci_timeout = Settings.respond_to?(:ci_timeout) ? Settings.ci_timeout : 180
+            # Get CI timeout from config with fallback to default
+            # Get timeout with fallback
+            has_timeout = Settings.respond_to?(:ci_timeout)
+            ci_timeout = has_timeout ? Settings.ci_timeout : 180
             {
               org: Settings.default_org,
               repo: Settings.default_repo,
@@ -368,7 +386,8 @@ OptionParser.new do |opts|
 
         # Verify it's a hash/dictionary
         unless custom_config.is_a?(Hash)
-          raise "Configuration file must contain a YAML dictionary/hash, not a #{custom_config.class}"
+          raise 'Configuration file must contain a YAML dictionary/hash, ' \
+                "not a #{custom_config.class}"
         end
 
         # Basic validation of required configuration keys
@@ -376,7 +395,8 @@ OptionParser.new do |opts|
 default_days}
         missing_keys = required_keys.select { |key| !custom_config.key?(key) }
         unless missing_keys.empty?
-          puts "Warning: Missing recommended keys in config file: #{missing_keys.join(', ')}"
+          puts 'Warning: Missing recommended keys in config file: ' \
+               "#{missing_keys.join(', ')}"
         end
 
         # Process all standard configuration keys
@@ -384,7 +404,8 @@ default_days}
           if custom_config['default_org'].is_a?(String)
             options[:org] = custom_config['default_org']
           else
-            puts "Warning: default_org must be a string, got #{custom_config['default_org'].class}"
+            puts 'Warning: default_org must be a string, ' \
+                 "got #{custom_config['default_org'].class}"
           end
         end
 
@@ -392,7 +413,8 @@ default_days}
           if custom_config['default_repo'].is_a?(String)
             options[:repo] = custom_config['default_repo']
           else
-            puts "Warning: default_repo must be a string, got #{custom_config['default_repo'].class}"
+            puts 'Warning: default_repo must be a string, ' \
+                 "got #{custom_config['default_repo'].class}"
           end
         end
 
@@ -400,7 +422,8 @@ default_days}
           if custom_config['default_branches'].is_a?(Array)
             options[:branches] = custom_config['default_branches']
           else
-            puts "Warning: default_branches must be an array, got #{custom_config['default_branches'].class}"
+            puts 'Warning: default_branches must be an array, ' \
+                 "got #{custom_config['default_branches'].class}"
           end
         end
 
@@ -408,7 +431,8 @@ default_days}
           if custom_config['default_days'].is_a?(Numeric)
             options[:days] = custom_config['default_days']
           else
-            puts "Warning: default_days must be a number, got #{custom_config['default_days'].class}"
+            puts 'Warning: default_days must be a number, ' \
+                 "got #{custom_config['default_days'].class}"
           end
         end
 
@@ -422,7 +446,8 @@ default_days}
           if custom_config['ci_timeout'].is_a?(Numeric)
             options[:ci_timeout] = custom_config['ci_timeout']
           else
-            puts "Warning: ci_timeout must be a number, got #{custom_config['ci_timeout'].class}"
+            puts 'Warning: ci_timeout must be a number, ' \
+                 "got #{custom_config['ci_timeout'].class}"
           end
         end
 
@@ -431,9 +456,13 @@ default_days}
           if !custom_config['organizations'].is_a?(Hash)
             puts 'Warning: organizations must be a hash/dictionary'
           elsif custom_config['default_org'] &&
-                !custom_config['organizations'].key?(custom_config['default_org'])
+                # Check if default_org exists in organizations
+                !custom_config['organizations'].key?(
+                  custom_config['default_org'],
+                )
             # Check if specified default_org exists in organizations
-            puts "Warning: default_org '#{custom_config['default_org']}' not found in organizations section"
+            puts "Warning: default_org '#{custom_config['default_org']}'" \
+                 ' not found in organizations section'
           end
         end
 
@@ -540,7 +569,8 @@ end
 
 # Skip actual GitHub API calls in dry-run mode
 if options[:dry_run]
-  puts "[DRY RUN] Would analyze [#{options[:org]}/#{options[:repo]}] Stats (Last #{options[:days]} days)"
+  puts "[DRY RUN] Would analyze [#{options[:org]}/#{options[:repo]}]" \
+       " Stats (Last #{options[:days]} days)"
   exit 0
 end
 

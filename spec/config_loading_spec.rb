@@ -40,8 +40,8 @@ class ConfigLoadingTest < Minitest::Test
   def test_custom_config_loading
     # This is a simple test to check if the script can load a custom config
     # Using --dry-run to avoid actual GitHub API calls
-    output = `ruby #{File.expand_path('../src/chef_ci_status.rb',
-__dir__)} --config #{@temp_config.path} --dry-run 2>&1`
+    script_path = File.expand_path('../src/chef_ci_status.rb', __dir__)
+    output = `ruby #{script_path} --config #{@temp_config.path} --dry-run 2>&1`
 
     # Verify the config was loaded
     assert_match(/Loaded custom configuration from/, output,
@@ -55,8 +55,8 @@ __dir__)} --config #{@temp_config.path} --dry-run 2>&1`
   def test_fallback_to_defaults
     # Test that the script falls back to defaults when config isn't found
     # We use a non-existent file path
-    output = `ruby #{File.expand_path('../src/chef_ci_status.rb',
-__dir__)} --config /nonexistent/path.yml --dry-run 2>&1`
+    script_path = File.expand_path('../src/chef_ci_status.rb', __dir__)
+    output = `ruby #{script_path} --config /nonexistent/path.yml --dry-run 2>&1`
 
     # Verify the output contains an error about the missing file
     assert_match(/Config file.*not found/, output,
@@ -80,8 +80,10 @@ __dir__)} --config /nonexistent/path.yml --dry-run 2>&1`
 
     # We use --verbose to see the options hash directly
     # Add --dry-run to skip GitHub API calls
-    output = `ruby #{File.expand_path('../src/chef_ci_status.rb',
-__dir__)} --config #{partial_config.path} --verbose --dry-run 2>&1`
+    script_path = File.expand_path('../src/chef_ci_status.rb', __dir__)
+    opts = "--config #{partial_config.path} --verbose --dry-run"
+    cmd = "ruby #{script_path} #{opts}"
+    output = `#{cmd} 2>&1`
 
     # Test that config loaded successfully
     assert_match(/Loaded custom configuration from/, output,
@@ -113,8 +115,9 @@ __dir__)} --config #{partial_config.path} --verbose --dry-run 2>&1`
     YAML
     malformed_config.close
 
-    output = `ruby #{File.expand_path('../src/chef_ci_status.rb',
-__dir__)} --config #{malformed_config.path} --dry-run 2>&1`
+    script_path = File.expand_path('../src/chef_ci_status.rb', __dir__)
+    cmd = "ruby #{script_path} --config #{malformed_config.path} --dry-run"
+    output = `#{cmd} 2>&1`
 
     # Should report error loading malformed config
     assert_match(/Failed to load custom configuration/, output,
@@ -132,7 +135,7 @@ __dir__)} --config #{malformed_config.path} --dry-run 2>&1`
   end
 
   def test_config_affects_script_behavior
-    # Test that the config actually affects script behavior beyond just help text
+    # Test that config affects script behavior (not just help text)
     # We'll create a minimal config and run a simple command
 
     minimal_config = Tempfile.new(['behavior_test', '.yml'])
@@ -147,8 +150,9 @@ __dir__)} --config #{malformed_config.path} --dry-run 2>&1`
     minimal_config.close
 
     # Using --verbose to see the options hash
-    output = `ruby #{File.expand_path('../src/chef_ci_status.rb',
-__dir__)} --config #{minimal_config.path} --verbose 2>&1 || echo "Error execution returned non-zero"`
+    script_path = File.expand_path('../src/chef_ci_status.rb', __dir__)
+    cmd = "ruby #{script_path} --config #{minimal_config.path} --verbose 2>&1"
+    output = `#{cmd} || echo "Error execution returned non-zero"`
 
     # Verify the config was loaded successfully
     assert_match(/Loaded custom configuration from/, output,
@@ -270,8 +274,8 @@ __dir__)} --dry-run --verbose 2>&1`
   end
 
   def test_config_merging_behavior
-    # Test that the config system properly merges configuration from multiple sources
-    # in the right priority order: CLI args > --config file > Settings > hardcoded defaults
+    # Test that the config system properly merges configuration
+    # Priority: CLI args > --config file > Settings > hardcoded defaults
 
     # Create a config file with custom settings
     merge_config = Tempfile.new(['merge_test', '.yml'])
@@ -286,7 +290,7 @@ __dir__)} --dry-run --verbose 2>&1`
     YAML
     merge_config.close
 
-    # Create a settings.local.yml in the config directory which should be loaded by Config gem
+    # Create settings.local.yml for the Config gem to load
     local_config_path = File.expand_path('../config/settings.local.yml',
 __dir__)
     local_config_existed = File.exist?(local_config_path)

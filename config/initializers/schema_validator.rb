@@ -117,7 +117,7 @@ module SchemaValidator
 
               if !repos.is_a?(Array) && !repos.respond_to?(:each_with_index)
                 errors << "Organization '#{org_key}' repositories " \
-                         "must be an array"
+                         'must be an array'
               elsif repos.respond_to?(:each_with_index)
                 # Validate each repository
                 repos.each_with_index do |repo, index|
@@ -126,7 +126,7 @@ module SchemaValidator
                   unless repo.is_a?(Hash) || repo.respond_to?(:key?) ||
                          repo.respond_to?(:has_key?)
                     errors << "Repository ##{index + 1} in '#{org_key}' " \
-                             "must be a hash/dictionary"
+                             'must be a hash/dictionary'
                     next
                   end
 

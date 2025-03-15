@@ -4,7 +4,7 @@ gem 'sqlite3', '~> 2.0'
 gem 'octokit', '~> 9.0'
 gem 'faraday-retry', '~> 2.0'
 gem 'gruff', '~> 0.25'
-gem 'config', '~> 4.0'  # Minimum version 4.0, allows updates to newer compatible versions
+gem 'config', '~> 4.0'  # Minimum version 4.0, compatible version updates only
 
 group(:development) do
   # for cookstyle

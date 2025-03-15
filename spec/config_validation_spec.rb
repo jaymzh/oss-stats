@@ -143,7 +143,7 @@ class ConfigValidationTest < Minitest::Test
 
       errors = SchemaValidator.validate_config(invalid_config)
       refute_empty errors,
-'Repository missing required keys should fail validation'
+                  'Repository missing required keys should fail validation'
 
       # Check specific error message
       assert_match(/missing 'name'/, errors.join(' '),
@@ -163,14 +163,16 @@ class ConfigValidationTest < Minitest::Test
     begin
       # Test validation fails when branches is not an array
       invalid_config = @valid_config.dup
-      invalid_config['organizations']['test-org']['repositories'][0]['branches'] =
-'main'
+      # Set branches to a non-array value
+      repos = invalid_config['organizations']['test-org']['repositories'][0]
+      repos['branches'] = 'main'
 
       errors = SchemaValidator.validate_config(invalid_config)
       refute_empty errors, 'Invalid branch structure should fail validation'
 
       # Check specific error message - the exact message might vary
-      assert_match(/branches must be an array|must be an array/, errors.join(' '),
+      assert_match(/branches must be an array|must be an array/,
+                  errors.join(' '),
                   'Should identify wrong type for branches')
     ensure
       # Restore test mode

@@ -16,3 +16,9 @@ organizations:
         branches: ["main"]
       - name: "inspec_tools"
         branches: ["master"]
+      - name: "vulcan"
+        branches: ["main"]
+      - name: "heimdall2"
+        branches: ["main"]
+      - name: "redhat-enterprise-linux-9-baseline"
+        branches: ["main"]
