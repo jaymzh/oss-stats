@@ -192,32 +192,34 @@ class ConfigLoadingTest < Minitest::Test
   end
   
   def test_ci_timeout_option
-    # Test the new ci_timeout option
-    timeout_config = Tempfile.new(['timeout_test', '.yml'])
-    timeout_config.write(<<~YAML)
+    # Create a custom config file for testing
+    custom_timeout_config = Tempfile.new(['custom_timeout', '.yml'])
+    custom_timeout_config.write(<<~YAML)
       default_org: 'timeout-org'
       default_repo: 'timeout-repo'
       default_days: 10
       default_mode: 'all'
-      ci_timeout: 120  # Set a custom CI timeout in config
+      ci_timeout: 120  # Custom timeout value different from default
     YAML
-    timeout_config.close
+    custom_timeout_config.close
     
-    # Add --dry-run to skip actual GitHub API calls
-    output = `ruby #{File.expand_path('../src/chef_ci_status.rb', __dir__)} --config #{timeout_config.path} --verbose --dry-run 2>&1`
-    
-    # Check that the custom CI timeout was loaded from config
-    assert_match(/Options: {.*:ci_timeout=>120.*}/, output,
-                "Custom CI timeout not loaded from config")
+    begin
+      # Run with verbose to see options
+      output = `ruby #{File.expand_path('../src/chef_ci_status.rb', __dir__)} --config #{custom_timeout_config.path} --verbose --dry-run 2>&1`
+      
+      # Check that the custom CI timeout was loaded from the config file
+      assert_match(/Options: {.*:ci_timeout=>120.*}/, output,
+                 "Custom CI timeout not loaded from config")
+    ensure
+      custom_timeout_config.unlink
+    end
     
     # Test CLI option overrides config
-    output_cli = `ruby #{File.expand_path('../src/chef_ci_status.rb', __dir__)} --config #{timeout_config.path} --ci-timeout 60 --verbose --dry-run 2>&1`
+    output_cli = `ruby #{File.expand_path('../src/chef_ci_status.rb', __dir__)} --ci-timeout 60 --verbose --dry-run 2>&1`
     
     # CLI should override config
     assert_match(/Options: {.*:ci_timeout=>60.*}/, output_cli,
                 "CLI --ci-timeout not overriding config value")
-    
-    timeout_config.unlink
   end
   
   def test_skip_ci_option

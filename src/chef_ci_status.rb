@@ -283,6 +283,8 @@ options = if defined?(Settings)
                            else
                              [Settings.default_mode]
                            end
+            # Get CI timeout from config or use default
+            ci_timeout = Settings.respond_to?(:ci_timeout) ? Settings.ci_timeout : 180
             {
               org: Settings.default_org,
               repo: Settings.default_repo,
@@ -290,7 +292,7 @@ options = if defined?(Settings)
               days: Settings.default_days,
               verbose: false,
               mode: default_mode,
-              ci_timeout: 180, # Default: 3 minutes
+              ci_timeout: ci_timeout, # From config or default: 3 minutes
             }
           else
             {
@@ -315,6 +317,8 @@ OptionParser.new do |opts|
     if File.exist?(v)
       begin
         custom_config = YAML.load_file(v)
+        
+        # Process all standard configuration keys
         if custom_config['default_org']
           options[:org] = custom_config['default_org']
         end
@@ -327,6 +331,16 @@ OptionParser.new do |opts|
         if custom_config['default_days']
           options[:days] = custom_config['default_days']
         end
+        if custom_config['default_mode']
+          mode = custom_config['default_mode']
+          options[:mode] = mode.is_a?(Array) ? mode : [mode]
+        end
+        
+        # Process CI timeout configuration
+        if custom_config['ci_timeout']
+          options[:ci_timeout] = custom_config['ci_timeout']
+        end
+        
         puts "Loaded custom configuration from #{v}"
       rescue => e
         puts "Error loading custom configuration: #{e.message}"
@@ -401,7 +415,10 @@ OptionParser.new do |opts|
     '--skip-ci',
     'Skip CI status processing (faster)',
   ) do
-    options[:mode].delete('ci')
+    # Remove 'ci' from any mode array
+    options[:mode] = options[:mode].reject { |m| m == 'ci' } if options[:mode].is_a?(Array)
+    # Also handle 'all' mode
+    options[:mode] = %w{pr issue} if options[:mode].include?('all')
   end
   
   opts.on(
