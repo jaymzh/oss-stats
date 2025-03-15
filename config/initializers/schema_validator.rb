@@ -77,7 +77,7 @@ module SchemaValidator
                 next
               end
 
-              # Check for required organization keys using a more flexible approach
+              # Check that organization has required keys
               # Check if org has a name using the appropriate method
               has_name = if org_data.respond_to?(:key?)
                            org_data.key?('name')
@@ -116,7 +116,8 @@ module SchemaValidator
               next if repos.nil?
 
               if !repos.is_a?(Array) && !repos.respond_to?(:each_with_index)
-                errors << "Organization '#{org_key}' repositories must be an array"
+                errors << "Organization '#{org_key}' repositories " \
+                         "must be an array"
               elsif repos.respond_to?(:each_with_index)
                 # Validate each repository
                 repos.each_with_index do |repo, index|
@@ -124,7 +125,8 @@ module SchemaValidator
 
                   unless repo.is_a?(Hash) || repo.respond_to?(:key?) ||
                          repo.respond_to?(:has_key?)
-                    errors << "Repository ##{index + 1} in '#{org_key}' must be a hash/dictionary"
+                    errors << "Repository ##{index + 1} in '#{org_key}' " \
+                             "must be a hash/dictionary"
                     next
                   end
 
@@ -150,10 +152,12 @@ module SchemaValidator
                                  end
 
                   unless has_name
-                    errors << "Repository ##{index + 1} in '#{org_key}' is missing 'name'"
+                    errors << "Repository ##{index + 1} in '#{org_key}' " \
+                             "is missing 'name'"
                   end
                   unless has_branches
-                    errors << "Repository ##{index + 1} in '#{org_key}' is missing 'branches'"
+                    errors << "Repository ##{index + 1} in '#{org_key}' " \
+                             "is missing 'branches'"
                   end
 
                   # Skip branches validation if not present
@@ -168,7 +172,8 @@ module SchemaValidator
 
                   next if branches.nil?
 
-                  next unless !branches.is_a?(Array) && !branches.respond_to?(:each)
+                  # Skip if branches is an array or enumerable
+                  next if branches.is_a?(Array) || branches.respond_to?(:each)
                   repo_name = if repo.respond_to?(:name)
                                 repo.name
                               elsif repo.respond_to?(:[])
