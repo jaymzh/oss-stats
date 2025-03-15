@@ -28,7 +28,7 @@ module SchemaValidator
 
       missing_keys = required_keys.select { |key| !config.send(check_key, key) }
       unless missing_keys.empty?
-        errors << "Missing required configuration keys: " \
+        errors << 'Missing required configuration keys: ' \
                  "#{missing_keys.join(', ')}"
       end
 
