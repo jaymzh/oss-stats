@@ -53,6 +53,36 @@ def prompt_yes_no(question)
   end
 end
 
+def prompt_team_or_q(teams)
+  # it's length, not length-1 because we add one for <other>
+  max_num = teams.length
+  loop do
+    puts "Choose a team that was present:\n"
+    (teams + ['<Other>']).each_with_index do |team, idx|
+      puts "\t[#{idx}] #{team}\n"
+    end
+    puts "\t[q] <quit>"
+    response = gets.strip.downcase
+    return false if response == 'q'
+    begin
+      i = Integer(response)
+      if i < max_num
+        return teams[i]
+      end
+
+      if i == max_num
+        print 'Team name: '
+        response = gets.strip
+        return response
+      end
+
+      puts "Invalid response: #{response}"
+    rescue ArgumentError
+      puts "Invalid response: #{response}"
+    end
+  end
+end
+
 # Collect team data from user
 def collect_team_data(meeting_date)
   teams = [
@@ -64,17 +94,49 @@ def collect_team_data(meeting_date)
     'Courier',
     'Inspec',
   ]
-  data = []
+  team_data = {}
 
-  puts "Please fill in data about the #{meeting_date} meeting"
-  teams.each do |team|
+  puts "Please fill in data about the #{meeting_date} meeting\n"
+  loop do
+    team = prompt_team_or_q(teams)
+    unless team
+      missing_teams = teams - team_data.keys
+      puts 'The following teams will be recorded as not present: ' +
+           missing_teams.join(', ')
+      if prompt_yes_no('Is that correct?')
+        missing_teams.each do |mt|
+          team_data[mt] = {
+            'present' => false,
+            'current_work' => false,
+            'build_status' => '',
+            'fix_pointers' => '-',
+            'extra' => '-',
+          }
+        end
+        break
+      else
+        next
+      end
+    end
+
+    if team_data[team]
+      if prompt_yes_no("WARNING: #{team} data already input - overwrite?")
+        puts "OK, overwriting data for #{team} on #{meeting_date}"
+      else
+        next
+      end
+    end
+
     puts "\nTeam: #{team}"
-    present = prompt_yes_no('Was the team present?')
-    if present
-      current_work = prompt_yes_no('Did they discuss current work?')
-      print "Enter build status (e.g. green, red, or 'main:green, 18:red'): "
-      build_status = gets.strip
-      fix_points = if build_status.include?('red')
+    team_data[team] = {}
+    team_data[team]['present'] = true
+    team_data[team]['current_work'] = prompt_yes_no(
+      'Did they discuss current work?',
+    )
+    print "Enter build status (e.g. green, red, or 'main:green, 18:red'): "
+    build_status = gets.strip
+    team_data[team]['build_status'] = build_status
+    fix_pointers = if build_status.include?('red')
                      if prompt_yes_no(
                        'Did they point to work to fix the build?',
                      )
@@ -85,27 +147,41 @@ def collect_team_data(meeting_date)
                    else
                      '-'
                    end
-      merged_prs = prompt_yes_no('Did they list merged PRs that week?')
-      print 'Any extra notes? (leave empty if none): '
-      extra_notes = gets.strip
-      extra = merged_prs ? 'listed merged PRs' : '-'
-      extra += ", #{extra_notes}" unless extra_notes.empty?
-    else
-      current_work = false
-      build_status = ''
-      fix_points = '-'
-      extra = '-'
-    end
-
-    data << [team, present ? 'Y' : 'N', current_work ? 'Y' : 'N', build_status,
-fix_points, extra]
+    team_data[team]['fix_pointers'] = fix_pointers
+    extra = []
+    merged_prs = prompt_yes_no('Did they list merged PRs that week?')
+    extra << 'listed merged PRs' if merged_prs
+    print 'Any extra notes? (leave empty if none): '
+    extra_notes = gets.strip
+    extra << extra_notes unless extra_notes.empty?
+    team_data[team]['extra'] = if extra.empty?
+                                 '-'
+                               else
+                                 extra.join(', ')
+                               end
   end
-
-  data
+  team_data.map do |team, info|
+    [
+      team,
+      info['present'] ? 'Y' : 'N',
+      info['current_work'] ? 'Y' : 'N',
+      info['build_status'],
+      info['fix_points'],
+      info['extra'],
+    ]
+  end
 end
 
 # Insert meeting data into the database
-def record_meeting_data(meeting_date, team_data)
+def record_meeting_data(meeting_date, team_data, options)
+  if options[:dryrun]
+    puts 'DRYRUN: Would record the following rows:'
+    team_data.each do |row|
+      pp row
+    end
+    return
+  end
+
   db = SQLite3::Database.new(DB_FILE)
   team_data.each do |row|
     db.execute(
@@ -119,6 +195,7 @@ def record_meeting_data(meeting_date, team_data)
     )
   end
   db.close
+  puts "Data recorded for #{meeting_date}."
 end
 
 # Retrieve meeting data from database
@@ -201,6 +278,10 @@ def generate_md_page
 end
 
 def generate_plots
+  if options[:dryrun]
+    puts 'DRYRUN: Would generate lots...'
+    return
+  end
   db = SQLite3::Database.new(DB_FILE)
   data = db.execute(
     'SELECT meeting_date, team, present, build_status FROM meeting_stats' +
@@ -250,7 +331,7 @@ def generate_plots
 end
 
 # Parse command-line arguments
-options = { mode: 'record' }
+options = { mode: 'record', dryrun: false }
 OptionParser.new do |opts|
   opts.banner = 'Usage: script.rb [options]'
   opts.on('--mode MODE', 'Mode: record, markdown, or plot') do |v|
@@ -264,6 +345,9 @@ OptionParser.new do |opts|
         nil
       end
   end
+  opts.on('-n', '--dryrun', 'Do not actually make changes') do |_v|
+    options[:dryrun] = true
+  end
 end.parse!
 
 initialize_db
@@ -272,16 +356,25 @@ meeting_date = options[:date] || get_last_thursday
 case options[:mode]
 when 'record'
   team_data = collect_team_data(meeting_date)
-  record_meeting_data(meeting_date, team_data)
-  puts "Data recorded for #{meeting_date}."
+  record_meeting_data(meeting_date, team_data, options)
 when 'markdown'
-  puts 'Updating plots...'
-  generate_plots
-  puts "Generating #{SLACK_MD_FILE}"
-  File.write(SLACK_MD_FILE, generate_md_page)
+  if options[:dryrun]
+    puts 'DRYRUN: Would update plots'
+    puts "DRYRUN: Would update #{SLACK_MD_FILE} with:"
+    puts generate_md_page
+  else
+    puts 'Updating plots...'
+    generate_plots
+    puts "Generating #{SLACK_MD_FILE}"
+    File.write(SLACK_MD_FILE, generate_md_page)
+  end
 when 'plot'
-  generate_plots
-  puts 'Plots generated: attendance.png and build_status.png'
+  if options[:dryrun]
+    puts 'DRYRUN: Would update plots'
+  else
+    generate_plots
+    puts 'Plots generated: attendance.png and build_status.png'
+  end
 else
   puts 'Invalid mode. Use --mode record, markdown, or plot.'
 end
