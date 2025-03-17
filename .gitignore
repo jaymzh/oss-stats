@@ -1,0 +1,35 @@
+# Ignore local configuration file
+config/settings.local.yml
+
+# Ignore bundler config and gems
+.bundle/
+vendor/
+
+# Ignore Ruby specific files
+*.gem
+*.rbc
+.rvmrc
+.ruby-version
+.ruby-gemset
+.rspec
+.rubocop-*
+coverage/
+pkg/
+
+# Ignore database files
+*.sqlite3
+*.db
+
+# Ignore logs
+*.log
+log/
+
+# Ignore OS specific files
+.DS_Store
+Thumbs.db
+
+# Ignore editor specific files
+.idea/
+.vscode/
+*.swp
+*~
