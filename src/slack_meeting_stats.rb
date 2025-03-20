@@ -261,7 +261,7 @@ def generate_md_page
     md << "## #{meeting_date}"
     md << ''
     md << '| Team | Present | Current work | Build Status |' +
-          'If builds broken, points to work to fix it | Extra |'
+          ' If builds broken, points to work to fix it | Extra |'
     md << '| --- | ---- | --- | --- | --- | --- |'
     team_data.each do |row|
       row = row.dup # This makes the row mutable
@@ -278,10 +278,6 @@ def generate_md_page
 end
 
 def generate_plots
-  if options[:dryrun]
-    puts 'DRYRUN: Would generate lots...'
-    return
-  end
   db = SQLite3::Database.new(DB_FILE)
   data = db.execute(
     'SELECT meeting_date, team, present, build_status FROM meeting_stats' +
