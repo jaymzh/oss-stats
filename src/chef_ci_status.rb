@@ -292,8 +292,9 @@ if options[:mode].include?('ci')
     if jobs.empty?
       puts ': No job failures found.'
     else
+      puts
       jobs.sort.each do |job, dates|
-        puts "\n        * #{job}: #{dates.size} days"
+        puts "        * #{job}: #{dates.size} days"
       end
     end
   end
