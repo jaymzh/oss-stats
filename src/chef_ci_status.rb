@@ -6,15 +6,8 @@ require 'yaml'
 require 'octokit'
 require 'set'
 
-# Get GitHub token
-def get_github_token
-  config_path = File.expand_path('~/.config/gh/hosts.yml')
-  if File.exist?(config_path)
-    config = YAML.load_file(config_path)
-    return config.dig('github.com', 'oauth_token')
-  end
-  nil
-end
+require_relative 'utils/log'
+require_relative 'utils/github_token'
 
 # Fetch PR and Issue stats from GitHub in a single API call
 def get_pr_and_issue_stats(client, options)
@@ -46,10 +39,10 @@ def get_pr_and_issue_stats(client, options)
       days_open = (Date.today - created_date).to_i
       days_since_last_activity = (Date.today - last_comment_date).to_i
 
-      if options[:verbose]
-        puts "Checking item: #{is_pr ? 'PR' : 'Issue'}, " +
-             "Created at #{created_date}, Closed at #{closed_date || 'N/A'}"
-      end
+      log.debug(
+        "Checking item: #{is_pr ? 'PR' : 'Issue'}, " +
+        "Created at #{created_date}, Closed at #{closed_date || 'N/A'}",
+      )
 
       stats = is_pr ? pr_stats : issue_stats
 
@@ -106,17 +99,18 @@ def get_failed_tests_from_ci(client, options)
   end
 
   options[:branches].each do |branch|
-    puts "Checking workflow runs for branch: #{branch}" if options[:verbose]
+    log.debug("Checking workflow runs for branch: #{branch}")
 
     workflows = client.workflows(repo).workflows
     workflows.each do |workflow|
-      puts "Workflow: #{workflow.name}" if options[:verbose]
+      log.debug("Workflow: #{workflow.name}")
       workflow_runs = []
       page = 1
       loop do
-        puts "  Acquiring page #{page}" if options[:verbose]
-        runs = client.workflow_runs(repo, workflow.id, branch:,
-status: 'completed', per_page: 100, page:)
+        log.debug("  Acquiring page #{page}")
+        runs = client.workflow_runs(
+          repo, workflow.id, branch:, status: 'completed', per_page: 100, page:
+        )
         break if runs.workflow_runs.empty?
 
         workflow_runs.concat(runs.workflow_runs)
@@ -128,15 +122,13 @@ status: 'completed', per_page: 100, page:)
       workflow_runs.sort_by!(&:created_at)
       last_failure_date = {}
       workflow_runs.each do |run|
-        puts "  Looking at workflow run #{run.id}" if options[:verbose]
+        log.debug("  Looking at workflow run #{run.id}")
         run_date = run.created_at.to_date
         next if run_date < cutoff_date
 
         jobs = client.workflow_run_jobs(repo, run.id).jobs
         jobs.each do |job|
-          if options[:verbose]
-            puts "    Looking at job #{job.name} [#{job.conclusion}]"
-          end
+          log.debug("    Looking at job #{job.name} [#{job.conclusion}]")
           if job.conclusion == 'failure'
             failed_tests[branch][job.name] ||= Set.new
           end
@@ -156,7 +148,7 @@ status: 'completed', per_page: 100, page:)
             last_failure_date.delete(job.name)
           end
         rescue StandardError => e
-          puts "Error getting jobs for run #{run.id}: #{e}"
+          log.error("Error getting jobs for run #{run.id}: #{e}")
           next
         end
       end
@@ -175,23 +167,26 @@ end
 
 def print_pr_or_issue_stats(stats, item)
   item_plural = item + 's'
-  puts "\n* #{item} Stats:"
-  puts "    * Opened #{item_plural}: #{stats[:opened]}"
-  puts "    * Closed #{item_plural}: #{stats[:closed]}"
+  log.info("\n* #{item} Stats:")
+  log.info("    * Opened #{item_plural}: #{stats[:opened]}")
+  log.info("    * Closed #{item_plural}: #{stats[:closed]}")
   if stats[:oldest_open]
-    puts "    * Oldest Open #{item}: #{stats[:oldest_open]}" +
-         " (#{stats[:oldest_open_days]} days open, last activity" +
-         " #{stats[:oldest_open_last_activity]} days ago)"
+    log.info(
+      "    * Oldest Open #{item}: #{stats[:oldest_open]}" +
+      " (#{stats[:oldest_open_days]} days open, last activity" +
+      " #{stats[:oldest_open_last_activity]} days ago)",
+    )
   end
-  puts "    * Stale #{item} (>30 days without comment): " +
-       stats[:stale_count].to_s
+  log.info(
+    "    * Stale #{item} (>30 days without comment): #{stats[:stale_count]}",
+  )
   avg_time = stats[:avg_time_to_close_hours]
   avg_time_str = if avg_time > 24
                    (avg_time / 24).round(2).to_s + ' days'
                  else
                    avg_time.round(2).to_s + ' hours'
                  end
-  puts "    * Avg Time to Close #{item_plural}: #{avg_time_str}"
+  log.info("    * Avg Time to Close #{item_plural}: #{avg_time_str}")
 end
 
 options = {
@@ -199,27 +194,13 @@ options = {
   repo: 'chef',
   branches: ['main'],
   days: 30,
-  verbose: false,
+  log_level: :info,
   mode: ['all'],
 }
 
 valid_modes = %w{ci pr issue all}
 OptionParser.new do |opts|
   opts.banner = 'Usage: chef_ci_status.rb [options]'
-
-  opts.on(
-    '--org ORG',
-    "GitHub org name (default: #{options[:org]})",
-  ) do |v|
-    options[:org] = v
-  end
-
-  opts.on(
-    '--repo REPO',
-    "GitHub repository name (default: #{options[:repo]})",
-  ) do |v|
-    options[:repo] = v
-  end
 
   opts.on(
     '--branches BRANCHES',
@@ -230,11 +211,27 @@ OptionParser.new do |opts|
   end
 
   opts.on(
+    '-d DAYS',
     '--days DAYS',
     Integer,
     "Number of days to analyze (default: #{options[:days]})",
   ) do |v|
     options[:days] = v
+  end
+
+  opts.on(
+    '--github-token TOKEN',
+    'GitHub personal access token (or use GITHUB_TOKEN env var)',
+  ) do |val|
+    options[:github_token] = val
+  end
+
+  opts.on(
+    '-l LEVEL',
+    '--log-level LEVEL',
+    'Set logging level to LEVEL. [default: info]',
+  ) do |level|
+    options[:log_level] = level.to_sym
   end
 
   opts.on(
@@ -253,26 +250,31 @@ OptionParser.new do |opts|
   end
 
   opts.on(
-    '-v',
-    '--verbose',
-    "Enable verbose output (default: #{options[:verbose]})",
-  ) do
-    options[:verbose] = true
+    '--org ORG',
+    "GitHub org name (default: #{options[:org]})",
+  ) do |v|
+    options[:org] = v
+  end
+
+  opts.on(
+    '--repo REPO',
+    "GitHub repository name (default: #{options[:repo]})",
+  ) do |v|
+    options[:repo] = v
   end
 end.parse!
 options[:mode] = %w{ci pr issue} if options[:mode].include?('all')
+log.level = options[:log_level] if options[:log_level]
 
-if options[:verbose]
-  puts "Options: #{options}"
-end
+log.debug("Options: #{options}")
 
-github_token = get_github_token
-raise 'GitHub token not found in ~/.config/gh/hosts.yml' unless github_token
-
+github_token = get_github_token!(options)
 client = Octokit::Client.new(access_token: github_token)
 
-puts "*_[#{options[:org]}/#{options[:repo]}] Stats " +
-     "(Last #{options[:days]} days)_*"
+log.info(
+  "*_[#{options[:org]}/#{options[:repo]}] Stats " +
+  "(Last #{options[:days]} days)_*",
+)
 
 if options[:mode].include?('pr') || options[:mode].include?('issue')
   stats = get_pr_and_issue_stats(client, options)
@@ -286,15 +288,16 @@ end
 
 if options[:mode].include?('ci')
   test_failures = get_failed_tests_from_ci(client, options)
-  puts "\n* CI Failure Stats:"
+  log.info("\n* CI Failure Stats:")
   test_failures.each do |branch, jobs|
-    print "    * Branch: #{branch}"
+    line = "    * Branch: #{branch}"
     if jobs.empty?
-      puts ': No job failures found.'
+      line += ': No job failures found.'
+      log.info(line)
     else
-      puts
+      log.info(line)
       jobs.sort.each do |job, dates|
-        puts "        * #{job}: #{dates.size} days"
+        log.info("        * #{job}: #{dates.size} days")
       end
     end
   end
