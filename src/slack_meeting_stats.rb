@@ -6,6 +6,8 @@ require 'sqlite3'
 require 'fileutils'
 require 'gruff'
 
+require_relative 'utils/log'
+
 DB_FILE = File.expand_path('../data/meeting_data.sqlite3', __dir__)
 SLACK_MD_FILE = File.expand_path('../team_slack_reports.md', __dir__)
 IMG_DIR = File.expand_path('../images', __dir__)
@@ -49,7 +51,7 @@ def prompt_yes_no(question)
     response = gets.strip.downcase
     return response == 'y' if ['y', 'n', ''].include?(response)
 
-    puts "Please enter 'y' or 'n'."
+    log.info("Please enter 'y' or 'n'.")
   end
 end
 
@@ -57,11 +59,11 @@ def prompt_team_or_q(teams)
   # it's length, not length-1 because we add one for <other>
   max_num = teams.length
   loop do
-    puts "Choose a team that was present:\n"
+    log.info("Choose a team that was present:\n")
     (teams + ['<Other>']).each_with_index do |team, idx|
-      puts "\t[#{idx}] #{team}\n"
+      log.info("\t[#{idx}] #{team}\n")
     end
-    puts "\t[q] <quit>"
+    log.info("\t[q] <quit>")
     response = gets.strip.downcase
     return false if response == 'q'
     begin
@@ -76,9 +78,9 @@ def prompt_team_or_q(teams)
         return response
       end
 
-      puts "Invalid response: #{response}"
+      log.error("Invalid response: #{response}")
     rescue ArgumentError
-      puts "Invalid response: #{response}"
+      log.error("Invalid response: #{response}")
     end
   end
 end
@@ -96,13 +98,15 @@ def collect_team_data(meeting_date)
   ]
   team_data = {}
 
-  puts "Please fill in data about the #{meeting_date} meeting\n"
+  log.info("Please fill in data about the #{meeting_date} meeting\n")
   loop do
     team = prompt_team_or_q(teams)
     unless team
       missing_teams = teams - team_data.keys
-      puts 'The following teams will be recorded as not present: ' +
-           missing_teams.join(', ')
+      log.info(
+        'The following teams will be recorded as not present: ' +
+           missing_teams.join(', '),
+      )
       if prompt_yes_no('Is that correct?')
         missing_teams.each do |mt|
           team_data[mt] = {
@@ -121,13 +125,13 @@ def collect_team_data(meeting_date)
 
     if team_data[team]
       if prompt_yes_no("WARNING: #{team} data already input - overwrite?")
-        puts "OK, overwriting data for #{team} on #{meeting_date}"
+        log.info("OK, overwriting data for #{team} on #{meeting_date}")
       else
         next
       end
     end
 
-    puts "\nTeam: #{team}"
+    log.info("\nTeam: #{team}")
     team_data[team] = {}
     team_data[team]['present'] = true
     team_data[team]['current_work'] = prompt_yes_no(
@@ -175,9 +179,9 @@ end
 # Insert meeting data into the database
 def record_meeting_data(meeting_date, team_data, options)
   if options[:dryrun]
-    puts 'DRYRUN: Would record the following rows:'
+    log.info('DRYRUN: Would record the following rows:')
     team_data.each do |row|
-      pp row
+      log.info(row.join(', '))
     end
     return
   end
@@ -195,7 +199,7 @@ def record_meeting_data(meeting_date, team_data, options)
     )
   end
   db.close
-  puts "Data recorded for #{meeting_date}."
+  log.info("Data recorded for #{meeting_date}.")
 end
 
 # Retrieve meeting data from database
@@ -327,12 +331,10 @@ def generate_plots
 end
 
 # Parse command-line arguments
-options = { mode: 'record', dryrun: false }
+options = { mode: 'record', dryrun: false, log_level: :info }
 OptionParser.new do |opts|
   opts.banner = 'Usage: script.rb [options]'
-  opts.on('--mode MODE', 'Mode: record, markdown, or plot') do |v|
-    options[:mode] = v
-  end
+
   opts.on('--date DATE', 'Date of the meeting in YYYY-MM-DD format') do |v|
     options[:date] =
       begin
@@ -341,10 +343,30 @@ OptionParser.new do |opts|
         nil
       end
   end
+
+  opts.on(
+    '-l LEVEL',
+    '--log-level LEVEL',
+    'Set logging level to LEVEL. [default: info]',
+  ) do |level|
+    options[:log_level] = level.to_sym
+  end
+
+  opts.on(
+    '-m MODE',
+    '--mode MODE',
+    %w{record generate generate_plot},
+    'Mode to operate in. record: Input new meeting info, generate: generate ' +
+    'both plot and markdown files, generate_plot: generate new plots',
+  ) do |v|
+    options[:mode] = v
+  end
+
   opts.on('-n', '--dryrun', 'Do not actually make changes') do |_v|
     options[:dryrun] = true
   end
 end.parse!
+log.level = options[:log_level] if options[:log_level]
 
 initialize_db
 meeting_date = options[:date] || get_last_thursday
@@ -353,24 +375,24 @@ case options[:mode]
 when 'record'
   team_data = collect_team_data(meeting_date)
   record_meeting_data(meeting_date, team_data, options)
-when 'markdown'
+when 'generate_md'
   if options[:dryrun]
-    puts 'DRYRUN: Would update plots'
-    puts "DRYRUN: Would update #{SLACK_MD_FILE} with:"
-    puts generate_md_page
+    log.info('DRYRUN: Would update plots')
+    log.info("DRYRUN: Would update #{SLACK_MD_FILE} with:")
+    log.info(generate_md_page)
   else
-    puts 'Updating plots...'
+    log.info('Updating plots...')
     generate_plots
-    puts "Generating #{SLACK_MD_FILE}"
+    log.info("Generating #{SLACK_MD_FILE}")
     File.write(SLACK_MD_FILE, generate_md_page)
   end
-when 'plot'
+when 'generate_plot'
   if options[:dryrun]
-    puts 'DRYRUN: Would update plots'
+    log.info('DRYRUN: Would update plots')
   else
     generate_plots
-    puts 'Plots generated: attendance.png and build_status.png'
+    log.info('Plots generated: attendance.png and build_status.png')
   end
 else
-  puts 'Invalid mode. Use --mode record, markdown, or plot.'
+  log.info('Invalid mode. Use --mode record, markdown, or plot.')
 end

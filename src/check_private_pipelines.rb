@@ -7,6 +7,9 @@ require 'base64'
 require 'uri'
 require 'optparse'
 
+require_relative 'utils/github_token'
+require_relative 'utils/log'
+
 def github_api_get(path, token)
   uri = URI("https://api.github.com#{path}")
   req = Net::HTTP::Get.new(uri)
@@ -24,8 +27,8 @@ def github_api_get(path, token)
   JSON.parse(res.body)
 end
 
-def get_expeditor_config(repo, token)
-  path = "/repos/#{ORG}/#{repo}/contents/.expeditor/config.yml"
+def get_expeditor_config(org, repo, token)
+  path = "/repos/#{org}/#{repo}/contents/.expeditor/config.yml"
   res = github_api_get(path, token)
   Base64.decode64(res['content'])
 rescue
@@ -34,62 +37,93 @@ end
 
 # Command-line options
 options = {
-  skip_patterns: %w{adhoc release}, # default
+  skip_patterns: %w{adhoc release},
+  repos: %w{},
+  org: 'chef',
+  log_level: :info,
 }
 
 OptionParser.new do |opts|
   opts.banner = 'Usage: check_gh_pipelines.rb [options]'
 
   opts.on(
-    '--skip PATTERN',
-    'Pipeline name substring to skip (can be used multiple times)',
+    '--github-token TOKEN',
+    'GitHub personal access token (or use GITHUB_TOKEN env var)',
   ) do |val|
-    options[:skip_patterns] << val unless options[:skip_patterns].include?(val)
+    options[:github_token] = val
   end
 
   opts.on(
-    '--token TOKEN',
-    'GitHub personal access token (or use GITHUB_TOKEN env var)',
-  ) do |val|
-    options[:token] = val
+    '-l LEVEL',
+    '--log-level LEVEL',
+    'Set logging level to LEVEL. [default: info]',
+  ) do |level|
+    options[:log_level] = level.to_sym
+  end
+
+  opts.on(
+    '--org ORG',
+    "GitHub org name. [default: #{options[:org]}]",
+  ) do |v|
+    options[:org] = v
+  end
+
+  opts.on(
+    '--repos REPO',
+    'GitHub repositories name. Can specify comma-separated list and/or ' +
+    ' use the option multiple times. Leave blank for all repos in the org.',
+  ) do |v|
+    options[:repos] += v.split(',')
+  end
+
+  opts.on(
+    '--skip PATTERN',
+    'Pipeline name substring to skip. Can specify a comma-separated list ' +
+    ' and/or use the option multiple times. ' +
+    "[default: #{options[:skip_patterns].join(',')}]",
+  ) do |v|
+    options[:skip_patterns] += v.split(',')
   end
 end.parse!
+log.level = options[:log_level] if options[:log_level]
 
-GITHUB_TOKEN = options[:token] || ENV['GITHUB_TOKEN']
-unless GITHUB_TOKEN
-  raise 'Missing GitHub token. Set --token or GITHUB_TOKEN env.'
-end
+options[:skip_patterns].uniq!
+options[:repos].uniq!
 
-ORG = 'chef'.freeze
+github_token = get_github_token!(options)
 
 total_pipeline_count = 0
 private_pipeline_count = 0
 repos_with_private = 0
 skipped_by_pattern = Hash.new(0)
 
-# Fetch all repos
-repos = []
-page = 1
+if options[:repos].empty?
+  log.info("Fetching repos under '#{options[:org]}'...")
+  page = 1
+  loop do
+    list = github_api_get(
+      "/orgs/#{options[:org]}/repos?per_page=100&page=#{page}",
+      github_token,
+    )
+    break if list.empty?
 
-puts "Fetching repos under '#{ORG}'..."
-
-loop do
-  list = github_api_get("/orgs/#{ORG}/repos?per_page=100&page=#{page}",
-GITHUB_TOKEN)
-  break if list.empty?
-
-  repos.concat(list.map { |r| r['name'] })
-  page += 1
+    options[:repos].concat(list.map { |r| r['name'] })
+    page += 1
+  end
+  log.debug("Discovered these repos: #{options[:repos].join(', ')}")
 end
 
-repos.each do |repo|
-  content = get_expeditor_config(repo, GITHUB_TOKEN)
-  next unless content
+options[:repos].each do |repo|
+  content = get_expeditor_config(options[:org], repo, github_token)
+  unless content
+    log.debug("No expeditor config for #{repo}")
+    next
+  end
 
   begin
     config = YAML.safe_load(content)
   rescue Psych::SyntaxError => e
-    warn "Skipping #{repo} due to YAML error: #{e}"
+    log.warn("Skipping #{repo} due to YAML error: #{e}")
     next
   end
 
@@ -118,9 +152,9 @@ repos.each do |repo|
   end
 
   next if repo_missing_public.empty?
-  puts "* #{repo}"
+  log.info("* #{repo}")
   repo_missing_public.each do |pname|
-    puts "    * #{pname}"
+    log.info("    * #{pname}")
   end
   repos_with_private += 1
 end
@@ -129,16 +163,18 @@ if total_pipeline_count > 0
   percentage_private = (
     (private_pipeline_count.to_f / total_pipeline_count.to_f) * 100
   ).round(2)
-  puts "\nTotal percentage of private pipelines: #{percentage_private}%"
-  puts "  --> #{private_pipeline_count} out of #{total_pipeline_count} " +
-       "across #{repos_with_private} repos"
+  log.info("\nTotal percentage of private pipelines: #{percentage_private}%")
+  log.info(
+    "  --> #{private_pipeline_count} out of #{total_pipeline_count} " +
+    "across #{repos_with_private} repos",
+  )
 
   if skipped_by_pattern.any?
-    puts ' -> Skipped pipelines:'
+    log.info('  --> Skipped pipelines:')
     skipped_by_pattern.each do |pattern, count|
-      puts "    - #{pattern}: #{count}"
+      log.info("    - #{pattern}: #{count}")
     end
   end
 else
-  puts 'No pipelines found (excluding skipped patterns).'
+  log.info('No pipelines found (excluding skipped patterns).')
 end
