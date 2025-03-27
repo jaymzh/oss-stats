@@ -68,6 +68,11 @@ markdown`.
 
 To update the stats for the week run `slack_meeting_stats.rb --mode record`.
 
+## Pipeline visibility stats
+
+[check_private_pipelines.rb](src/check_private_pipelines.rb) will walk all
+repos and based on the expeditor config provide a report or private pipelines.
+
 ## Manual or semi-manual stats
 
 There are a variety fo miscelanious manual statistics which are gathered
