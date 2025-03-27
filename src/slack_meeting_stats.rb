@@ -212,7 +212,7 @@ end
 
 # Format Yes/No to display emojis
 def format_yes_no(value)
-  return '❌' if value.strip.upcase == 'N'
+  return '❌' if !value || value.strip.upcase == 'N'
   return '✅' if value.strip.upcase == 'Y'
 
   value
