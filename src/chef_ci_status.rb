@@ -175,15 +175,15 @@ end
 
 def print_pr_or_issue_stats(stats, item)
   item_plural = item + 's'
-  puts "\n  #{item} Stats:"
-  puts "    Opened #{item_plural}: #{stats[:opened]}"
-  puts "    Closed #{item_plural}: #{stats[:closed]}"
+  puts "\n* #{item} Stats:"
+  puts "    * Opened #{item_plural}: #{stats[:opened]}"
+  puts "    * Closed #{item_plural}: #{stats[:closed]}"
   if stats[:oldest_open]
-    puts "    Oldest Open #{item}: #{stats[:oldest_open]}" +
+    puts "    * Oldest Open #{item}: #{stats[:oldest_open]}" +
          " (#{stats[:oldest_open_days]} days open, last activity" +
          " #{stats[:oldest_open_last_activity]} days ago)"
   end
-  puts "    Stale #{item} (>30 days without comment): " +
+  puts "    * Stale #{item} (>30 days without comment): " +
        stats[:stale_count].to_s
   avg_time = stats[:avg_time_to_close_hours]
   avg_time_str = if avg_time > 24
@@ -191,7 +191,7 @@ def print_pr_or_issue_stats(stats, item)
                  else
                    avg_time.round(2).to_s + ' hours'
                  end
-  puts "    Avg Time to Close #{item_plural}: #{avg_time_str}"
+  puts "    * Avg Time to Close #{item_plural}: #{avg_time_str}"
 end
 
 options = {
@@ -271,7 +271,8 @@ raise 'GitHub token not found in ~/.config/gh/hosts.yml' unless github_token
 
 client = Octokit::Client.new(access_token: github_token)
 
-puts "[#{options[:org]}/#{options[:repo]}] Stats (Last #{options[:days]} days)"
+puts "*_[#{options[:org]}/#{options[:repo]}] Stats " +
+     "(Last #{options[:days]} days)_*"
 
 if options[:mode].include?('pr') || options[:mode].include?('issue')
   stats = get_pr_and_issue_stats(client, options)
@@ -285,14 +286,14 @@ end
 
 if options[:mode].include?('ci')
   test_failures = get_failed_tests_from_ci(client, options)
-  puts "\n  CI Failure Stats:"
+  puts "\n* CI Failure Stats:"
   test_failures.each do |branch, jobs|
-    puts "    Branch: #{branch}"
+    print "    * Branch: #{branch}"
     if jobs.empty?
-      puts '      No job failures found.'
+      puts ': No job failures found.'
     else
       jobs.sort.each do |job, dates|
-        puts "      #{job}: #{dates.size} days"
+        puts "\n        * #{job}: #{dates.size} days"
       end
     end
   end
