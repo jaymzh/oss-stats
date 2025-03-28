@@ -9,6 +9,13 @@ require 'set'
 require_relative 'utils/log'
 require_relative 'utils/github_token'
 
+def rate_limited_sleep(options)
+  if options[:limit_gh_ops_per_minute]&.positive?
+    sleep_time = 60.0 / options[:limit_gh_ops_per_minute]
+    sleep(sleep_time)
+  end
+end
+
 # Fetch PR and Issue stats from GitHub in a single API call
 def get_pr_and_issue_stats(client, options)
   repo = "#{options[:org]}/#{options[:repo]}"
@@ -111,6 +118,8 @@ def get_failed_tests_from_ci(client, options)
         runs = client.workflow_runs(
           repo, workflow.id, branch:, status: 'completed', per_page: 100, page:
         )
+        rate_limited_sleep(options)
+
         break if runs.workflow_runs.empty?
 
         workflow_runs.concat(runs.workflow_runs)
@@ -127,6 +136,8 @@ def get_failed_tests_from_ci(client, options)
         next if run_date < cutoff_date
 
         jobs = client.workflow_run_jobs(repo, run.id).jobs
+        rate_limited_sleep(options)
+
         jobs.each do |job|
           log.debug("    Looking at job #{job.name} [#{job.conclusion}]")
           if job.conclusion == 'failure'
@@ -150,6 +161,8 @@ def get_failed_tests_from_ci(client, options)
         rescue StandardError => e
           log.error("Error getting jobs for run #{run.id}: #{e}")
           next
+        ensure
+          rate_limited_sleep(options)
         end
       end
 
@@ -224,6 +237,14 @@ OptionParser.new do |opts|
     'GitHub personal access token (or use GITHUB_TOKEN env var)',
   ) do |val|
     options[:github_token] = val
+  end
+
+  opts.on(
+    '--limit-gh-ops-per-minute RATE',
+    Float,
+    'Rate limit GitHub API operations to this number per minute',
+  ) do |v|
+    options[:limit_gh_ops_per_minute] = v
   end
 
   opts.on(
