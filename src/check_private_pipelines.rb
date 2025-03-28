@@ -107,13 +107,21 @@ if options[:repos].empty?
     )
     break if list.empty?
 
-    options[:repos].concat(list.map { |r| r['name'] })
+    options[:repos].concat(
+      list.select { |r| !r['private'] }.map { |r| r['name'] },
+    )
     page += 1
   end
-  log.debug("Discovered these repos: #{options[:repos].join(', ')}")
+  log.debug("Discovered these public repos: #{options[:repos].join(', ')}")
 end
 
 options[:repos].each do |repo|
+  repo_info = github_api_get("/repos/#{options[:org]}/#{repo}", github_token)
+  if repo_info['private']
+    log.debug("Skipping private repo: #{repo}")
+    next
+  end
+
   content = get_expeditor_config(options[:org], repo, github_token)
   unless content
     log.debug("No expeditor config for #{repo}")
