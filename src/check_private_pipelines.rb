@@ -107,6 +107,11 @@ if options[:repos].empty?
     )
     break if list.empty?
 
+    priv = list.select { |r| r['private'] }.map { |r| r['name'] }
+    unless priv.empty?
+      log.debug("Found private repos: #{priv.join(', ')}")
+    end
+
     options[:repos].concat(
       list.select { |r| !r['private'] }.map { |r| r['name'] },
     )
