@@ -12,6 +12,7 @@ require_relative 'utils/github_token'
 def rate_limited_sleep(options)
   if options[:limit_gh_ops_per_minute]&.positive?
     sleep_time = 60.0 / options[:limit_gh_ops_per_minute]
+    log.debug("Sleeping for #{sleep_time} to honor rate-limit")
     sleep(sleep_time)
   end
 end
@@ -75,6 +76,7 @@ def get_pr_and_issue_stats(client, options)
 
       # Only count as closed if it was actually closed within the cutoff window
       next unless closed_date && closed_date >= cutoff_date
+
       stats[:closed] += 1
       stats[:total_close_time] += (item.closed_at - item.created_at) / 3600.0
       all_items_before_cutoff = false
@@ -202,113 +204,7 @@ def print_pr_or_issue_stats(stats, item)
   log.info("    * Avg Time to Close #{item_plural}: #{avg_time_str}")
 end
 
-options = {
-  org: 'chef',
-  repo: 'chef',
-  branches: ['main'],
-  days: 30,
-  log_level: :info,
-  mode: ['all'],
-}
-
-valid_modes = %w{ci pr issue all}
-OptionParser.new do |opts|
-  opts.banner = 'Usage: chef_ci_status.rb [options]'
-
-  opts.on(
-    '--branches BRANCHES',
-    Array,
-    "Comma-separated list of branches (default: #{options[:branches]})",
-  ) do |v|
-    options[:branches] = v
-  end
-
-  opts.on(
-    '-d DAYS',
-    '--days DAYS',
-    Integer,
-    "Number of days to analyze (default: #{options[:days]})",
-  ) do |v|
-    options[:days] = v
-  end
-
-  opts.on(
-    '--github-token TOKEN',
-    'GitHub personal access token (or use GITHUB_TOKEN env var)',
-  ) do |val|
-    options[:github_token] = val
-  end
-
-  opts.on(
-    '--limit-gh-ops-per-minute RATE',
-    Float,
-    'Rate limit GitHub API operations to this number per minute',
-  ) do |v|
-    options[:limit_gh_ops_per_minute] = v
-  end
-
-  opts.on(
-    '-l LEVEL',
-    '--log-level LEVEL',
-    'Set logging level to LEVEL. [default: info]',
-  ) do |level|
-    options[:log_level] = level.to_sym
-  end
-
-  opts.on(
-    '--mode MODE',
-    Array,
-    'Comma-separated list of modes: ci,issue,pr, or all (default: all)',
-  ) do |v|
-    invalid_modes = v - valid_modes
-    unless invalid_modes.empty?
-      raise OptionParser::InvalidArgument,
-        "Invalid mode(s): #{invalid_modes.join(', ')}." +
-        "Valid modes are: #{valid_modes.join(', ')}"
-    end
-
-    options[:mode] = v
-  end
-
-  opts.on(
-    '--org ORG',
-    "GitHub org name (default: #{options[:org]})",
-  ) do |v|
-    options[:org] = v
-  end
-
-  opts.on(
-    '--repo REPO',
-    "GitHub repository name (default: #{options[:repo]})",
-  ) do |v|
-    options[:repo] = v
-  end
-end.parse!
-options[:mode] = %w{ci pr issue} if options[:mode].include?('all')
-log.level = options[:log_level] if options[:log_level]
-
-log.debug("Options: #{options}")
-
-github_token = get_github_token!(options)
-client = Octokit::Client.new(access_token: github_token)
-
-log.info(
-  "*_[#{options[:org]}/#{options[:repo]}] Stats " +
-  "(Last #{options[:days]} days)_*",
-)
-
-if options[:mode].include?('pr') || options[:mode].include?('issue')
-  stats = get_pr_and_issue_stats(client, options)
-
-  %w{PR Issue}.each do |item|
-    if options[:mode].include?(item.downcase)
-      print_pr_or_issue_stats(stats[item.downcase.to_sym], item)
-    end
-  end
-end
-
-if options[:mode].include?('ci')
-  test_failures = get_failed_tests_from_ci(client, options)
+def print_ci_status(test_failures, _options)
   log.info("\n* CI Failure Stats:")
   test_failures.each do |branch, jobs|
     line = "    * Branch: #{branch}"
@@ -323,3 +219,121 @@ if options[:mode].include?('ci')
     end
   end
 end
+
+def parse_options
+  options = {
+    org: 'chef',
+    repo: 'chef',
+    branches: ['main'],
+    days: 30,
+    log_level: :info,
+    mode: ['all'],
+  }
+  valid_modes = %w{ci pr issue all}
+  OptionParser.new do |opts|
+    opts.banner = 'Usage: chef_ci_status.rb [options]'
+
+    opts.on(
+      '--branches BRANCHES',
+      Array,
+      "Comma-separated list of branches (default: #{options[:branches]})",
+    ) do |v|
+      options[:branches] = v
+    end
+
+    opts.on(
+      '-d DAYS',
+      '--days DAYS',
+      Integer,
+      "Number of days to analyze (default: #{options[:days]})",
+    ) do |v|
+      options[:days] = v
+    end
+
+    opts.on(
+      '--github-token TOKEN',
+      'GitHub personal access token (or use GITHUB_TOKEN env var)',
+    ) do |val|
+      options[:github_token] = val
+    end
+
+    opts.on(
+      '--limit-gh-ops-per-minute RATE',
+      Float,
+      'Rate limit GitHub API operations to this number per minute',
+    ) do |v|
+      options[:limit_gh_ops_per_minute] = v
+    end
+
+    opts.on(
+      '-l LEVEL',
+      '--log-level LEVEL',
+      'Set logging level to LEVEL. [default: info]',
+    ) do |level|
+      options[:log_level] = level.to_sym
+    end
+
+    opts.on(
+      '--mode MODE',
+      Array,
+      'Comma-separated list of modes: ci,issue,pr, or all (default: all)',
+    ) do |v|
+      invalid_modes = v - valid_modes
+      unless invalid_modes.empty?
+        raise OptionParser::InvalidArgument,
+              "Invalid mode(s): #{invalid_modes.join(', ')}." +
+              "Valid modes are: #{valid_modes.join(', ')}"
+      end
+
+      options[:mode] = v
+    end
+
+    opts.on(
+      '--org ORG',
+      "GitHub org name (default: #{options[:org]})",
+    ) do |v|
+      options[:org] = v
+    end
+
+    opts.on(
+      '--repo REPO',
+      "GitHub repository name (default: #{options[:repo]})",
+    ) do |v|
+      options[:repo] = v
+    end
+  end.parse!
+  options[:mode] = %w{ci pr issue} if options[:mode].include?('all')
+  options
+end
+
+def main
+  options = parse_options
+  log.level = options[:log_level] if options[:log_level]
+
+  log.debug("Options: #{options}")
+
+  github_token = get_github_token!(options)
+  client = Octokit::Client.new(access_token: github_token)
+
+  log.info(
+    "*_[#{options[:org]}/#{options[:repo]}] Stats " +
+    "(Last #{options[:days]} days)_*",
+  )
+
+  if options[:mode].include?('pr') || options[:mode].include?('issue')
+    stats = get_pr_and_issue_stats(client, options)
+
+    %w{PR Issue}.each do |item|
+      if options[:mode].include?(item.downcase)
+        print_pr_or_issue_stats(stats[item.downcase.to_sym], item)
+      end
+    end
+  end
+
+  if options[:mode].include?('ci')
+    test_failures = get_failed_tests_from_ci(client, options)
+    print_ci_status(test_failures, options)
+  end
+end
+
+main if __FILE__ == $PROGRAM_NAME
