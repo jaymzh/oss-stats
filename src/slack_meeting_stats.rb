@@ -61,7 +61,7 @@ def prompt_team_or_q(teams)
   loop do
     log.info("Choose a team that was present:\n")
     (teams + ['<Other>']).each_with_index do |team, idx|
-      log.info("\t[#{idx}] #{team}\n")
+      log.info("\t[#{idx}] #{team}")
     end
     log.info("\t[q] <quit>")
     response = gets.strip.downcase
@@ -375,7 +375,7 @@ case options[:mode]
 when 'record'
   team_data = collect_team_data(meeting_date)
   record_meeting_data(meeting_date, team_data, options)
-when 'generate_md'
+when 'generate'
   if options[:dryrun]
     log.info('DRYRUN: Would update plots')
     log.info("DRYRUN: Would update #{SLACK_MD_FILE} with:")
