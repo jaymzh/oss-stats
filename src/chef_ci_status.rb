@@ -6,8 +6,8 @@ require 'yaml'
 require 'octokit'
 require 'set'
 
-require_relative 'utils/log'
-require_relative 'utils/github_token'
+require_relative 'lib/oss_stats/log'
+require_relative 'lib/oss_stats/github_token'
 
 def rate_limited_sleep(options)
   if options[:limit_gh_ops_per_minute]&.positive?
