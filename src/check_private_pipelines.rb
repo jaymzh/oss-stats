@@ -9,8 +9,8 @@ require 'optparse'
 require 'fileutils'
 require 'mixlib/shellout'
 
-require_relative 'utils/github_token'
-require_relative 'utils/log'
+require_relative 'lib/oss_stats/github_token'
+require_relative 'lib/oss_stats/log'
 
 def github_api_get(path, token)
   uri = URI("https://api.github.com#{path}")
