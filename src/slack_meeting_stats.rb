@@ -197,12 +197,14 @@ def fetch_meeting_data(meeting_date)
 end
 
 # Format Yes/No to display emojis
-def format_yes_no(value)
+#
+# if `force`, that means nil is the same as no.
+def format_yes_no(value, force = false)
   return ':x:' unless value
 
   case value.strip.upcase
   when 'N'
-    ':red_circle:'
+    force ? ':x:' : ':red_circle:'
   when 'Y'
     ':white_check_mark:'
   else
@@ -242,8 +244,8 @@ def generate_md_page(db_file)
     md << '| --- | ---- | --- | --- | --- | --- |'
     team_data.each do |row|
       row = row.dup # This makes the row mutable
-      row[1] = format_yes_no(row[1])  # Present
-      row[2] = format_yes_no(row[2])  # Current work
+      row[1] = format_yes_no(row[1], true)  # Present
+      row[2] = format_yes_no(row[2], true)  # Current work
       row[3] = format_build_status(row[3]) # Build Status
       row[4] = if row[3].include?('❌')
                  format_yes_no(row[4]) # Fix points
