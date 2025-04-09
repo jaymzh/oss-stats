@@ -10,9 +10,9 @@ Stats from this repo will (hopefully) be published in the weekly slack meetings.
 
 ## Build Status
 
-The [chef_ci_status.rb](src/chef_ci_status.rb) script will walk GitHub CI
-workflows for a given repo, and report the number of days each one was red on
-the `main` branch in the last N days (default: 30).
+The [ci_status.rb](src/ci_status.rb) script will walk GitHub CI workflows for a
+given repo, and report the number of days each one was red on the `main` branch
+in the last N days (default: 30).
 
 The output looks like:
 
@@ -47,7 +47,7 @@ $ ./src/chef_ci_status.rb --days 1 --branches chef-18,main
 ```
 
 The wrapper [run_weekly_ci_reports.sh](src/run_weekly_ci_reports.sh) loops
-over all the relevant repos and runs `chef-ci-status.rb`. This is intended
+over all the relevant repos and runs `ci-status.rb`. This is intended
 for posting in the weekly Chef Community Slack meeting.
 
 ## Slack Meeting Stats
@@ -60,17 +60,17 @@ Reports](images/build_status-small.png)
 A per-meeting table can be found in [Slack Status
 Tracking](team_slack_reports.md). This data is tracked in a sqlite database in
 this repo which you can interact with via
-[slack_meeting_stats.rb](src/slack_meeting_stats.rb). See the help message for
+[meeting_stats.rb](src/meeting_stats.rb). See the help message for
 details.
 
-To update the `team_slack_reports.md`, run run `slack_meeting_stats.rb --mode
+To update the `team_slack_reports.md`, run run `meeting_stats.rb --mode
 markdown`.
 
-To update the stats for the week run `slack_meeting_stats.rb --mode record`.
+To update the stats for the week run `meeting_stats.rb --mode record`.
 
 ## Pipeline visibility stats
 
-[check_private_pipelines.rb](src/check_private_pipelines.rb) will walk all
+[pipeline_visibility_stats.rb](src/pipeline_visibility_stats.rb) will walk all
 repos and based on the expeditor config provide a report or private pipelines.
 
 ## Manual or semi-manual stats

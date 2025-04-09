@@ -133,6 +133,7 @@ DEPENDENCIES
   faraday-retry
   gruff
   mdl
+  mixlib-config
   mixlib-log
   octokit
   rspec

@@ -1,8 +1,8 @@
 require 'rspec'
 require 'octokit'
-require_relative '../src/chef_ci_status'
+require_relative '../src/ci_stats'
 
-RSpec.describe 'chef_ci_status' do
+RSpec.describe 'ci_status' do
   let(:client) { instance_double(Octokit::Client) }
   let(:options) do
     {
