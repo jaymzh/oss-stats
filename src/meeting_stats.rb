@@ -168,7 +168,7 @@ def record_meeting_data(meeting_date, team_data, config)
     return
   end
 
-  db = SQLite3::Database.new(DB_FILE)
+  db = SQLite3::Database.new(config.db_file)
   team_data.each do |row|
     db.execute(
       'INSERT INTO meeting_stats (meeting_date, team, present, current_work,' +
@@ -182,18 +182,6 @@ def record_meeting_data(meeting_date, team_data, config)
   end
   db.close
   log.info("Data recorded for #{meeting_date}.")
-end
-
-# Retrieve meeting data from database
-def fetch_meeting_data(meeting_date)
-  db = SQLite3::Database.new(DB_FILE)
-  results = db.execute(
-    'SELECT team, present, current_work, build_status, fix_points, extra' +
-    ' FROM meeting_stats WHERE meeting_date = ?',
-    [meeting_date.to_s],
-  )
-  db.close
-  results
 end
 
 # Format Yes/No to display emojis
