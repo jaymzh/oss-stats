@@ -88,6 +88,7 @@ options = {
   source_dir: nil,
   assume_yes: false,
   skip_repos: [],
+  verify_only: true,
 }
 
 OptionParser.new do |opts|
@@ -145,6 +146,12 @@ OptionParser.new do |opts|
     '--source-dir DIR',
     'Directory to look for or clone the repo into.',
   ) { |v| options[:source_dir] = v }
+
+  opts.on(
+    '--[no-]verify-only',
+    'By default we only look at verify pipelines as those are the only ' +
+    'ones that run on PRs. Use --no-verify-only to change this',
+  ) { |v| options[:verify_only] = v }
 end.parse!
 
 log.level = options[:log_level] if options[:log_level]
@@ -210,12 +217,24 @@ options[:repos].each do |repo|
     pipeline_block = { pipeline_block => {} } if pipeline_block.is_a?(String)
 
     pipeline_block.each do |pipeline_name, pipeline_details|
+      if options[:verify_only] && !pipeline_name.start_with?('verify')
+        log.debug("Skipping non-verify pipeline #{pipeline_name}")
+        next
+      end
+
       skip_matched = options[:skip_patterns].find do |pat|
         pipeline_name.include?(pat)
       end
 
       if skip_matched
         skipped_by_pattern[skip_matched] += 1
+        next
+      end
+
+      env = pipeline_details['env'] || []
+      if env.any? { |i| i['ADHOC'] }
+        log.warn("#{pipeline_name} is marked as adhoc but isn't named as such")
+        skipped_by_pattern['adhoc'] += 1
         next
       end
 
