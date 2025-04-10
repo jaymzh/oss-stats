@@ -5,6 +5,7 @@ gem 'octokit'
 gem 'faraday-retry'
 gem 'gruff'
 gem 'mixlib-log'
+gem 'mixlib-config'
 
 group(:development) do
   # for cookstyle
