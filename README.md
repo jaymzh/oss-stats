@@ -1,79 +1,97 @@
-# chef-oss-stats
+# OSS Stats
 
-[![Lint](https://github.com/jaymzh/chef-oss-stats/actions/workflows/lint.yml/badge.svg)](https://github.com/jaymzh/chef-oss-stats/actions/workflows/lint.yml)
-[![DCO Check](https://github.com/jaymzh/chef-oss-stats/actions/workflows/dco.yml/badge.svg)](https://github.com/jaymzh/chef-oss-stats/actions/workflows/dco.yml)
+[![Lint](https://github.com/jaymzh/oss-stats/actions/workflows/lint.yml/badge.svg)](https://github.com/jaymzh/oss-stats/actions/workflows/lint.yml)
+[![DCO Check](https://github.com/jaymzh/oss-stats/actions/workflows/dco.yml/badge.svg)](https://github.com/jaymzh/oss-stats/actions/workflows/dco.yml)
 
-This repo aims to track stats that affect how Chef Users ("the community") can
-interact with Progress' development teams and repositories.
+This is a collection of scripts that aim to make it easier to track and report
+various metrics around health of an open source project.
 
-Stats from this repo will (hopefully) be published in the weekly slack meetings.
+It was born out of the Chef ecosystem, but should be generic enough for any
+project. The [chef-oss-stats](https://github.com/jaymzh/chef-oss-stats/) repo
+is a useful example to look at to see the results, though.
 
-## Build Status
+## How to use this repo
 
-The [ci_status.rb](src/ci_status.rb) script will walk GitHub CI workflows for a
+The easiest way to use this repo is to make it a submodule of your own repo
+and then add config files in your own repo that save the relevant reports
+and data to your own repo.
+
+## CI Stats
+
+The [ci_stats.rb](src/ci_stats.rb) script will walk GitHub CI workflows for a
 given repo, and report the number of days each one was red on the `main` branch
-in the last N days (default: 30).
+in the last N days (default: 30) as well as gather stats on Issues and PRs.
 
 The output looks like:
 
 ```shell
-$ ./src/chef_ci_status.rb --days 1 --branches chef-18,main
-*[chef/chef] Stats (Last 1 days)*
+$ ./src/ci_stats.rb --days 7 --branches chef-18,main --org chef --repo chef
+*_[chef/chef] Stats (Last 7 days)_*
 
-  PR Stats (Last 1 days):
-    Opened PRs: 11
-    Closed PRs: 12
-    Oldest Open PR: 2024-09-06 (188 days open, last activity 49 days ago)
-    Stale PRs (>30 days without comment): 11
-    Avg Time to Close PRs: 1.26 days
+* PR Stats:
+    * Opened PRs: 15
+    * Closed PRs: 13
+    * Oldest Open PR: 2024-09-06 (208 days open, last activity 69 days ago)
+    * Stale PR (>30 days without comment): 8
+    * Avg Time to Close PRs: 18.47 days
 
-  Issue Stats (Last 1 days):
-    Opened Issues: 0
-    Closed Issues: 0
-    Oldest Open Issue: 2024-09-23 (171 days open, last activity 27 days ago)
-    Stale Issues (>30 days without comment): 13
-    Avg Time to Close Issues: 0 hours
+* Issue Stats:
+    * Opened Issues: 2
+    * Closed Issues: 1
+    * Oldest Open Issue: 2024-07-26 (250 days open, last activity 233 days ago)
+    * Stale Issue (>30 days without comment): 14
+    * Avg Time to Close Issues: 14.27 days
 
-  CI Failure Stats (last 1 days):
-    Branch: chef-18
-      vm_lnx_x86_64 (almalinux-8): 1 days
-      vm_lnx_x86_64 (rockylinux-9): 1 days
-      unit: 1 days
-      docr_lnx_x86_64 (rockylinux-8): 1 days
-
-    Branch: main
-      docr_lnx_x86_64 (debian-12): 1 days
-      vm_lnx_x86_64 (oracle-8): 1 days
+* CI Failure Stats:
+    * Branch: main
+        * docr_lnx_x86_64 (debian-11): 1 days
+        * docr_lnx_x86_64 (rockylinux-8): 1 days
+        * docr_lnx_x86_64 (ubuntu-2204): 1 days
+        * vm_lnx_x86_64 (almalinux-8): 1 days
+        * vm_lnx_x86_64 (almalinux-9): 1 days
+        * vm_lnx_x86_64 (amazonlinux-2): 1 days
+        * vm_lnx_x86_64 (amazonlinux-2023): 1 days
+        * vm_lnx_x86_64 (debian-11): 1 days
+        * vm_lnx_x86_64 (debian-12): 1 days
+        * vm_lnx_x86_64 (fedora-40): 2 days
+        * vm_lnx_x86_64 (opensuse-leap-15): 1 days
+        * vm_lnx_x86_64 (oracle-7): 1 days
+        * vm_lnx_x86_64 (oracle-8): 1 days
+        * vm_lnx_x86_64 (oracle-9): 1 days
+        * vm_lnx_x86_64 (rockylinux-8): 2 days
+    * Branch: chef18: No job failures found.
 ```
 
-The wrapper [run_weekly_ci_reports.sh](src/run_weekly_ci_reports.sh) loops
-over all the relevant repos and runs `ci-status.rb`. This is intended
-for posting in the weekly Chef Community Slack meeting.
+As you can see the output is in markdown format suitable for posting in Slack,
+or storing in Github.
 
-## Slack Meeting Stats
+There are a lot of options you can use to customize what is included in the
+report.
 
-These are stats from the Slack meetings:
+## Meeting Stats
 
-![Attendance](images/attendance-small.png) ![Build Status
-Reports](images/build_status-small.png)
+Many open source projects have weekly meetings and it's important to know
+that the relevant teams are showing up and reporting the expected data.
 
-A per-meeting table can be found in [Slack Status
-Tracking](team_slack_reports.md). This data is tracked in a sqlite database in
-this repo which you can interact with via
-[meeting_stats.rb](src/meeting_stats.rb). See the help message for
-details.
+The [meeting_stats.rb](src/meeting_stats.rb) script will allow you to record
+the results of a meeting and then generate a report, including images with
+trends over time.
 
-To update the `team_slack_reports.md`, run run `meeting_stats.rb --mode
-markdown`.
+You will **definitely** want a config file to make this useful for your
+project, and you can see
+[examples/meeting_stats_config.rb](examples/meeting_stats_config.rb) for an
+example.
 
-To update the stats for the week run `meeting_stats.rb --mode record`.
+To update the stats for the week run `./src/meeting_stats.rb --mode record`,
+and to update the report run `./src/meeting_stats.rb --mode generate`.
 
 ## Pipeline visibility stats
 
-[pipeline_visibility_stats.rb](src/pipeline_visibility_stats.rb) will walk all
-repos and based on the expeditor config provide a report or private pipelines.
+:warning: This is a Work In Progress! :warning:
 
-## Manual or semi-manual stats
+Currently [pipeline_visibility_stats.rb](src/pipeline_visibility_stats.rb) only
+supports Expeditor, which is Chef-specific and not open source. However, much
+of the code is generic and this could be adapted to other things.
 
-There are a variety of miscelanious manual statistics which are gathered
-manually and recorded in [Misc stats](manual_stats/misc.md)
+The idea here is to walk public repos and find tests that are not visible to
+the public and report on them.
