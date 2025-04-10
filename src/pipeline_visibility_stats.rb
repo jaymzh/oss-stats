@@ -78,6 +78,14 @@ rescue Mixlib::ShellOut::ShellCommandFailed
   raise
 end
 
+def output(fh, msg)
+  if fh
+    fh.write("#{msg}\n")
+  else
+    log.info(msg)
+  end
+end
+
 # Command-line options
 options = {
   skip_patterns: %w{adhoc release},
@@ -122,6 +130,12 @@ OptionParser.new do |opts|
   ) { |v| options[:org] = v }
 
   opts.on(
+    '-o FILE',
+    '--output FILE',
+    'Write the output to FILE',
+  ) { |v| options[:output] = v }
+
+  opts.on(
     '--repos REPO',
     Array,
     'GitHub repositories name. Can specify comma-separated list and/or ' +
@@ -159,6 +173,11 @@ options[:skip_patterns].uniq!
 options[:repos].uniq!
 options[:make_prs_for].uniq!
 
+if options[:output]
+  fh = open(options[:output], 'w')
+  log.info("Generating report and writing to #{options[:output]}")
+end
+
 github_token = get_github_token!(options)
 
 total_pipeline_count = 0
@@ -166,6 +185,7 @@ private_pipeline_count = 0
 repos_with_private = 0
 skipped_by_pattern = Hash.new(0)
 
+output(fh, "Pipeline Visibility Report #{Date.today}\n")
 if options[:repos].empty?
   log.info("Fetching repos under '#{options[:org]}'...")
   page = 1
@@ -196,6 +216,8 @@ options[:repos].each do |repo|
     log.debug("Skipping private repo: #{repo}")
     next
   end
+
+  print('.') if fh
 
   content = get_expeditor_config(options[:org], repo, github_token)
   unless content
@@ -247,9 +269,9 @@ options[:repos].each do |repo|
   end
 
   next if repo_missing_public.empty?
-  log.info("* #{repo}")
+  output(fh, "* #{repo}")
   repo_missing_public.each do |pname|
-    log.info("    * #{pname}")
+    output(fh, "    * #{pname}")
   end
   repos_with_private += 1
 
@@ -302,18 +324,22 @@ if total_pipeline_count > 0
   percentage_private = (
     (private_pipeline_count.to_f / total_pipeline_count.to_f) * 100
   ).round(2)
-  log.info("\nTotal percentage of private pipelines: #{percentage_private}%")
-  log.info(
+  output(fh, "\nTotal percentage of private pipelines: #{percentage_private}%")
+  output(
+    fh,
     "  --> #{private_pipeline_count} out of #{total_pipeline_count} " +
     "across #{repos_with_private} repos",
   )
 
   if skipped_by_pattern.any?
-    log.info('  --> Skipped pipelines:')
+    output(fh, '  --> Skipped pipelines:')
     skipped_by_pattern.each do |pattern, count|
-      log.info("    - #{pattern}: #{count}")
+      output(fh, "    - #{pattern}: #{count}")
     end
   end
 else
-  log.info('No pipelines found (excluding skipped patterns).')
+  output(fh, 'No pipelines found (excluding skipped patterns).')
 end
+
+puts if fh
+fh.close if options[:output]
