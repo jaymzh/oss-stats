@@ -95,3 +95,16 @@ of the code is generic and this could be adapted to other things.
 
 The idea here is to walk public repos and find tests that are not visible to
 the public and report on them.
+
+## Misc Promises
+
+The [promises.rb](src/promises.rb) script allows you to add, edit, resolve,
+abandon, and report on promises.
+
+Example output:
+
+```text
+$ promises.rb
+- Publish Chef 19 / 2025 plan (210 days ago)
+- Fedora 41+ support (190 days ago)
+```

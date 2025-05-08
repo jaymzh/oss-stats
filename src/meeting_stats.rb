@@ -409,7 +409,7 @@ when 'generate'
     File.write(config.output, generate_md_page(config.db_file))
   end
 when 'generate_plot'
-  if oconfig.dryrun
+  if config.dryrun
     log.info('DRYRUN: Would update plots')
   else
     generate_plots(config.db_file, config.image_dir)
