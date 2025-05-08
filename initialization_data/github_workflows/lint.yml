@@ -1,0 +1,43 @@
+name: Lint
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  ruby:
+    strategy:
+      fail-fast: false
+      matrix:
+        ruby: [3.1, 3.3]
+    runs-on: ubuntu-latest
+    steps:
+    - name: Install system deps
+      run: |
+        sudo apt-get update
+        sudo apt-get -y install imagemagick libmagickwand-dev
+    - name: Checkout repository
+      uses: actions/checkout@v2
+      with:
+        path: 'chef-oss-stats'
+    - name: Checkout repository
+      uses: actions/checkout@v2
+      with:
+        repository: jaymzh/oss-stats
+        path: 'oss-stats'
+    - name: Setup Ruby
+      uses: ruby/setup-ruby@v1
+      with:
+        ruby-version: ${{ matrix.ruby }}
+    - name: Install ruby dependencies
+      run: bundle install
+      working-directory: ./chef-oss-stats
+    - name: Run chefstyle
+      run: ../oss-stats/scripts/run_cookstyle.sh
+      working-directory: ./chef-oss-stats
+    # it's a but dumb to run MDL on two versions of ruby
+    # but it's better than re-setting up a container, installing
+    # imagemagic so that we can bundle install...
+    - name: Run markdownlint
+      run: ../oss-stats/scripts/run_markdownlint.sh .
+      working-directory: ./chef-oss-stats
