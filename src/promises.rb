@@ -7,6 +7,8 @@ require 'date'
 require_relative 'lib/oss_stats/log'
 require_relative 'lib/oss_stats/promises_config'
 
+log.level = :info
+
 def initialize_db(path)
   db = SQLite3::Database.new(path)
   db.execute <<-SQL
@@ -136,6 +138,14 @@ def edit_promise(config)
   db.close
 end
 
+def output(fh, msg)
+  if fh
+    fh.write("#{msg}\n")
+  else
+    log.info(msg)
+  end
+end
+
 def show_status(config, include_abandoned: false)
   db = SQLite3::Database.new(config.db_file)
   query = "SELECT description, promised_on, reference, status
@@ -146,8 +156,16 @@ def show_status(config, include_abandoned: false)
   rows = db.execute(query)
   db.close
 
+  fh = nil
+  if config.output
+    fh = open(config.output, 'w')
+    log.info("Generating report and writing to #{config.output}")
+  end
+
+  output(fh, config.header)
+
   if rows.empty?
-    puts 'No matching promises.'
+    output(fh, 'No matching promises.')
     return
   end
 
@@ -157,8 +175,25 @@ def show_status(config, include_abandoned: false)
     label = "#{desc} (#{days} days ago)"
     label += " [ref: #{ref}]" unless ref.empty?
     label += " [#{status}]" if status == 'abandoned'
-    puts "- #{label}"
+    output(fh, "- #{label}")
   end
+end
+
+def prompt_date(txt = 'Date')
+  parse_date(prompt(txt, Date.today.to_s))
+end
+
+def prompt(txt, default = nil)
+  p = txt
+  if default
+    p << " [#{default}]"
+  end
+  print "#{p}: "
+  resp = gets.strip
+  if resp.empty? && default
+    return default
+  end
+  resp
 end
 
 def main
@@ -191,30 +226,64 @@ def main
     opts.on('--date=DATE', 'Date (YYYY-MM-DD)') do |d|
       options[:date] = parse_date(d)
     end
+
     opts.on('--promise=TEXT', 'Promise text') do |p|
       options[:promise] = p
     end
+
     opts.on('--reference=TEXT', 'Optional reference') do |r|
       options[:reference] = r
     end
+
+    opts.on(
+      '-l LEVEL',
+      '--log-level LEVEL',
+      'Set logging level to LEVEL. [default: info]',
+    ) do |level|
+      options[:log_level] = level.to_sym
+    end
+
     opts.on('--db-file=FILE', 'Path to DB file') do |f|
       options[:db_file] = f
     end
+
     opts.on('--include-abandoned', 'Include abandoned in status') do
       options[:include_abandoned] = true
     end
+
+    opts.on(
+      '-o FILE',
+      '--output FILE',
+      'Write the output to FILE',
+    ) { |v| options[:output] = v }
+
     opts.on('-m MODE', '--mode MODE',
             %w{add resolve abandon edit status},
             'Mode to operate in') do |m|
       options[:mode] = m
     end
+
     opts.on('-h', '--help', 'Show help') do
       puts opts
       exit
     end
   end.parse!
+  log.level = options[:log_level] if options[:log_level]
 
+  if options[:config]
+    expanded_config = File.expand_path(options[:config])
+  else
+    f = OssStats::PromisesConfig.config_file
+    expanded_config = File.expand_path(f) if f
+  end
+
+  if expanded_config && File.exist?(expanded_config)
+    log.debug("Loading config from #{expanded_config}")
+    OssStats::PromisesConfig.from_file(expanded_config)
+  end
   OssStats::PromisesConfig.merge!(options)
+  log.level = OssStats::PromisesConfig.log_level
+
   config = OssStats::PromisesConfig
 
   initialize_db(config.db_file)
@@ -239,23 +308,6 @@ def main
     puts "Unknown mode: #{config.mode}"
     exit 1
   end
-end
-
-def prompt_date(txt = 'Date')
-  parse_date(prompt(txt, Date.today.to_s))
-end
-
-def prompt(txt, default = nil)
-  p = txt
-  if default
-    p << " [#{default}]"
-  end
-  print "#{p}: "
-  resp = gets.strip
-  if resp.empty? && default
-    return default
-  end
-  resp
 end
 
 main if __FILE__ == $PROGRAM_NAME
