@@ -1,7 +1,16 @@
 #!/bin/bash
 
+MYDIR="$(dirname $(realpath $0))"
 DRYRUN=0
 FORCE=0
+DIRS=(
+    data
+    ci_reports
+    pipeline_visibility_reports
+    promises
+    images
+    .github/workflows
+)
 
 warn() {
     echo "WARNING: $*"
@@ -24,22 +33,37 @@ run() {
     "$@"
 }
 
-cat <<EOF
+usage() {
+    cat <<EOF
+$0 <options>
+
 This script will initialize a new repo that utilizes oss-stats. It should
 be run in an empty directory, or new git clone.
+
+Options:
+    -f
+            Force. Copy over files, even if the directory is not empty.
+    -n
+            Dryrun. Don't do any work, just say what you would do.
+    -h
+            Print this help message.
 EOF
+}
 
 while getopts fhn opt; do
     case "$opt" in
+        d)
+            DEBUG=1
+            ;;
+        f)
+            FORCE=1
+            ;;
         h)
             usage
             exit
             ;;
         n)
             DRYRUN=1
-            ;;
-        f)
-            FORCE=1
             ;;
         ?)
             exit 1
@@ -56,17 +80,47 @@ if [[ "$num" -ne 0 ]]; then
     fi
 fi
 
-mydir="$(dirname $(realpath $0))"
-echo "Making necessary directories"
-mkdir -p data ci_reports pipeline_visibility_reports promises images \
-    .github/workflows
-echo "Copying basic config files..."
-for file in $(find $mydir/../initialization_data/ -maxdepth 1 -type f); do
-    if [[ "$file" =~ rubocop.yml ]]; then
-        run cp "$file" .rubocop.yml
-    else
-        run cp "$file" .
+cat <<'EOF'
+Welcome to oss-stats!
+
+We'll go ahead and setup this directory to be ready to track your open source
+stats!
+
+EOF
+
+echo "=> Making necessary directories"
+run mkdir -p "${DIRS[@]}"
+
+echo "=> Copying basic skeleton files"
+for file in $(find "$MYDIR/../initialization_data/" -maxdepth 1 -type f); do
+    dst=$(basename "$file")
+    if [[ "$dst" ==  'rubocop.yml' ]]; then
+        dst='.rubocop.yml'
     fi
+    run cp "$file" "$dst"
 done
-echo "Setting up GH Workflows"
-run cp "$mydir/../initialization_data/github_workflows/"* ./.github/workflows
+
+echo "=> Copying sample config files"
+run cp "$MYDIR/../examples/"*_config.rb .
+
+echo "=> Setting up GH Workflows"
+run cp "$MYDIR/../initialization_data/github_workflows/"* ./.github/workflows
+
+cat <<'EOF'
+
+OK, this directory is setup. Your next step is to modify the config files in
+this directory, and do an initial run. Generally the first script people are
+interested in would be run like:
+
+  ../oss-stats/src/ci_stats.rb --org <YOUR_ORG> --repo <SOME_REPO>
+
+We recommend running it regularly (e.g. weekly) and storing the output in the
+ci_reports directory we've created, ala:
+
+  date=$(date '+%Y-%m-%d')
+  out="ci_reports/${date}.md"
+  for repo in $repos; do
+    ../oss-stats/src/ci_stats.rb --org <YOUR_ORG> --repo $repo >> $out
+  done
+
+EOF

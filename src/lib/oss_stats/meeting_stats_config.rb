@@ -37,7 +37,6 @@ module OssStats
         File.join(ENV['HOME'], '.config', 'oss_stats'),
         '/etc',
       ].each do |dir|
-        puts dir
         f = File.join(dir, 'meeting_stats_config.rb')
         log.debug("Checking if #{f} exists...")
         return f if ::File.exist?(f)
