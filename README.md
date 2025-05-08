@@ -12,9 +12,24 @@ is a useful example to look at to see the results, though.
 
 ## How to use this repo
 
-The easiest way to use this repo is to make it a submodule of your own repo
-and then add config files in your own repo that save the relevant reports
-and data to your own repo.
+You'll want to create your own repository to keep the data and results that
+these scripts use and generate about your project.
+
+This repo has a script that'll do all the required initial work. On your new
+repo, do:
+
+```shell
+<path_to_this_repo>/scripts/intialize_repo.sh
+```
+
+This will:
+
+* Generate basic config skeleton files for the various scripts
+* Create necessary directories
+* Setup a GitHub Actions workflow for you
+
+You can run it with `-n` (dryrun) to see what it will do without actually
+doing anything.
 
 ## CI Stats
 
@@ -108,3 +123,6 @@ $ promises.rb
 - Publish Chef 19 / 2025 plan (210 days ago)
 - Fedora 41+ support (190 days ago)
 ```
+
+You likely will probably want a config file for this as well and a sample
+is provided in [examples/promises_config.rb](examples/promises_config.rb).

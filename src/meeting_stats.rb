@@ -248,6 +248,34 @@ def generate_md_page(db_file)
   md.join("\n")
 end
 
+def summary(db_file)
+  db = SQLite3::Database.new(db_file)
+  data = db.execute(
+    'SELECT meeting_date, team, present, build_status FROM meeting_stats' +
+    ' ORDER BY meeting_date ASC',
+  )
+  db.close
+
+  # TODO: de-dupe this with generate_plots
+  dates = data.map { |row| row[0] }.uniq.reverse
+  dates[0..2].each do |date|
+    total_teams = data.count { |row| row[0] == date }
+    present_teams = data.count { |row| row[0] == date && row[2] == 'Y' }
+    present_pct = ((present_teams / total_teams) * 100).round(2)
+    reporting_builds = data.count do |row|
+      row[0] == date && row[3] != 'N' && !row[3].strip.empty?
+    end
+    reporting_builds_pct =
+      ((reporting_builds.to_f / total_teams) * 100).round(2)
+
+    puts "* #{date}:"
+    puts "    * Teams reported: #{present_teams} out of #{total_teams} (" +
+         "#{present_pct}%)"
+    puts "    * Teams reporting build status: #{reporting_builds} out of " +
+         "#{total_teams} (#{reporting_builds_pct}%)\n"
+  end
+end
+
 def generate_plots(db_file, img_dir)
   db = SQLite3::Database.new(db_file)
   data = db.execute(
@@ -300,7 +328,7 @@ end
 # Parse command-line arguments
 options = {}
 OptionParser.new do |opts|
-  opts.banner = 'Usage: script.rb [options]'
+  opts.banner = 'Usage: meeting_stats.rb [options]'
 
   opts.on(
     '-c FILE',
@@ -351,10 +379,10 @@ OptionParser.new do |opts|
   opts.on(
     '-m MODE',
     '--mode MODE',
-    %w{record generate generate_plot},
+    %w{record generate generate_plot summary},
     'Mode to operate in. record: Input new meeting info, generate: generate ' +
-    'both plot and markdown files, generate_plot: generate new plots. ' +
-    '[default: record]',
+    'both plot and markdown files, generate_plot: generate new plots, ' +
+    'summary: generate summary of last 3 meetings [default: record]',
   ) do |v|
     options[:mode] = v
   end
@@ -415,6 +443,8 @@ when 'generate_plot'
     generate_plots(config.db_file, config.image_dir)
     log.info('Plots generated: attendance.png and build_status.png')
   end
+when 'summary'
+  summary(config.db_file)
 else
   log.info('Invalid mode. Use --mode record, markdown, or plot.')
 end
