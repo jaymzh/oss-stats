@@ -7,7 +7,7 @@ module OssStats
 
     db_file File.expand_path('./data/promises.sqlite3', Dir.pwd)
     dryrun false
-    output File.expand_path('./promises_stats.md', Dir.pwd)
+    output nil
     log_level :info
     mode 'status'
     include_abandoned false
@@ -23,7 +23,7 @@ module OssStats
         File.join(ENV['HOME'], '.config', 'oss_stats'),
         '/etc',
       ].each do |dir|
-        f = File.join(dir, 'promises.rb')
+        f = File.join(dir, 'promises_config.rb')
         log.debug("Checking if #{f} exists...")
         return f if ::File.exist?(f)
       end
