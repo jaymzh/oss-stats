@@ -235,6 +235,12 @@ options[:repos].each do |repo|
   pipelines = config['pipelines'] || []
   repo_missing_public = []
 
+  # It's a bummer to walk through this twice, but it's a very small list
+  # and we need all the names to mmatch _private pipelines
+  pipeline_names = pipelines.map do |pl|
+    pl.is_a?(String) ? pl : pl.keys
+  end.flatten
+
   pipelines.each do |pipeline_block|
     pipeline_block = { pipeline_block => {} } if pipeline_block.is_a?(String)
 
@@ -242,6 +248,18 @@ options[:repos].each do |repo|
       if options[:verify_only] && !pipeline_name.start_with?('verify')
         log.debug("Skipping non-verify pipeline #{pipeline_name}")
         next
+      end
+
+      # if we have a private version of a pipeline, allow it if there's
+      # also a public
+      if pipeline_name.end_with?('_private')
+        pubname = pipeline_name.gsub('_private', '')
+        if pipeline_names.include?(pubname)
+          log.debug("Skipping #{pipeline_name}, #{pubname} exists")
+          skipped_by_pattern[pipeline_name] += 1
+          next
+        end
+        log.warn("There is a #{pipeline_name} pipeline but no #{pubname}")
       end
 
       skip_matched = options[:skip_patterns].find do |pat|
