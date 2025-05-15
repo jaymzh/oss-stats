@@ -43,12 +43,16 @@ def patch_yaml_public_flag!(text, pipeline_names)
   modified = false
 
   lines.each_with_index do |line, idx|
-    next unless line =~ /^\s*-\s+(\S+)(:)?\s*$/
+    match = line.match(/^\s*-\s+(\S+?)(:)?\s*$/)
+    next unless match
+    log.trace("Processing line #{line}")
     current_pipeline = Regexp.last_match(1)
     has_block = Regexp.last_match(2)
     indent = line[/^\s*/] + '  '
 
+    log.trace("Line is for #{current_pipeline}")
     next unless pipeline_names.include?(current_pipeline)
+    log.trace("... which is a pipeline from #{pipeline_names}")
     if has_block
       next if lines[idx + 1..idx + 5].any? { |l| l =~ /^\s*public:\s*true/ }
     else
