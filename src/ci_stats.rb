@@ -22,12 +22,22 @@ def get_pr_and_issue_stats(client, options)
   repo = "#{options[:org]}/#{options[:repo]}"
   cutoff_date = Date.today - options[:days]
   pr_stats = {
-    opened: 0, closed: 0, total_close_time: 0.0, oldest_open: nil,
-    oldest_open_days: 0, oldest_open_last_activity: 0, stale_count: 0
+    open: 0, closed: 0, total_close_time: 0.0, oldest_open: nil,
+    oldest_open_days: 0, oldest_open_last_activity: 0, stale_count: 0,
+    opened_this_period: 0
   }
   issue_stats = {
-    opened: 0, closed: 0, total_close_time: 0.0, oldest_open: nil,
-    oldest_open_days: 0, oldest_open_last_activity: 0, stale_count: 0
+    open: 0, closed: 0, total_close_time: 0.0, oldest_open: nil,
+    oldest_open_days: 0, oldest_open_last_activity: 0, stale_count: 0,
+    opened_this_period: 0
+  }
+  prs = {
+    open: [],
+    closed: [],
+  }
+  issues = {
+    open: [],
+    closed: [],
   }
   stale_cutoff = Date.today - 30
   page = 1
@@ -53,30 +63,40 @@ def get_pr_and_issue_stats(client, options)
       )
 
       stats = is_pr ? pr_stats : issue_stats
+      list = is_pr ? prs : issues
 
-      # Track oldest open PR/Issue with days open and last activity days
-      if closed_date.nil? &&
-         !labels.include?('Status: Waiting on Contributor') &&
-         (stats[:oldest_open].nil? || created_date < stats[:oldest_open])
-        stats[:oldest_open] = created_date
-        stats[:oldest_open_days] = days_open
-        stats[:oldest_open_last_activity] = days_since_last_activity
-      end
+      # we count open as open and not waiting on contributor
+      if closed_date.nil? && !labels.include?('Status: Waiting on Contributor')
+        if stats[:oldest_open].nil? || created_date < stats[:oldest_open]
+          stats[:oldest_open] = created_date
+          stats[:oldest_open_days] = days_open
+          stats[:oldest_open_last_activity] = days_since_last_activity
+        end
 
-      if closed_date.nil? && last_comment_date < stale_cutoff &&
-         !labels.include?('Status: Waiting on Contributor')
-        stats[:stale_count] += 1
-      end
+        if last_comment_date < stale_cutoff
+          stats[:stale_count] += 1
+        end
 
-      # Only count if the created date is within the cutoff window
-      if created_date >= cutoff_date
-        stats[:opened] += 1
-        all_items_before_cutoff = false
+        stats[:open] += 1
+        # Count those opened recently separately
+        if created_date >= cutoff_date
+          stats[:opened_this_period] += 1
+          list[:open] << item
+          all_items_before_cutoff = false
+          # if it's opened in the right period, but not yet closed,
+          # we count that as "not closed this week/month/whatever"
+        end
       end
 
       # Only count as closed if it was actually closed within the cutoff window
       next unless closed_date && closed_date >= cutoff_date
 
+      # if it's a PR make sure it was closed by merging
+      next unless !is_pr || item.pull_request.merged_at
+
+      # anything closed this week counts as closed regardless of when it
+      # was opened
+      list[:closed] << item
       stats[:closed] += 1
       stats[:total_close_time] += (item.closed_at - item.created_at) / 3600.0
       all_items_before_cutoff = false
@@ -95,7 +115,7 @@ def get_pr_and_issue_stats(client, options)
       issue_stats[:total_close_time] / issue_stats[:closed]
     end
 
-  { pr: pr_stats, issue: issue_stats }
+  { pr: pr_stats, issue: issue_stats, pr_list: prs, issue_list: issues }
 end
 
 def get_failed_tests_from_ci(client, options)
@@ -180,20 +200,42 @@ def get_failed_tests_from_ci(client, options)
   failed_tests
 end
 
-def print_pr_or_issue_stats(stats, item)
-  item_plural = item + 's'
-  log.info("\n* #{item} Stats:")
-  log.info("    * Opened #{item_plural}: #{stats[:opened]}")
-  log.info("    * Closed #{item_plural}: #{stats[:closed]}")
+def print_pr_or_issue_stats(data, type, include_list)
+  stats = data[type.downcase.to_sym]
+  list = data["#{type.downcase}_list".to_sym]
+  type_plural = type + 's'
+  log.info("\n* #{type} Stats:")
+  log.info("    * Closed #{type_plural}: #{stats[:closed]}")
+  if include_list
+    list[:closed].each do |item|
+      log.info(
+        "        * [#{item.title} (##{item.number})](#{item.html_url}) " +
+        "- @#{item.user.login}",
+      )
+    end
+  end
+  log.info(
+    "     * Open #{type_plural}: #{stats[:open]} " +
+    "(#{include_list ? 'listing ' : ''} #{stats[:opened_this_period]} " +
+    'opened this period)',
+  )
+  if include_list && stats[:opened_this_period] > 0
+    list[:open].each do |item|
+      log.info(
+        "        * [#{item.title} (##{item.number})](#{item.html_url}) " +
+        "- @#{item.user.login}",
+      )
+    end
+  end
   if stats[:oldest_open]
     log.info(
-      "    * Oldest Open #{item}: #{stats[:oldest_open]}" +
+      "    * Oldest Open #{type}: #{stats[:oldest_open]}" +
       " (#{stats[:oldest_open_days]} days open, last activity" +
       " #{stats[:oldest_open_last_activity]} days ago)",
     )
   end
   log.info(
-    "    * Stale #{item} (>30 days without comment): #{stats[:stale_count]}",
+    "    * Stale #{type} (>30 days without comment): #{stats[:stale_count]}",
   )
   avg_time = stats[:avg_time_to_close_hours]
   avg_time_str = if avg_time > 24
@@ -201,17 +243,18 @@ def print_pr_or_issue_stats(stats, item)
                  else
                    avg_time.round(2).to_s + ' hours'
                  end
-  log.info("    * Avg Time to Close #{item_plural}: #{avg_time_str}")
+  log.info("    * Avg Time to Close #{type_plural}: #{avg_time_str}")
 end
 
 def print_ci_status(test_failures, _options)
-  log.info("\n* CI Failure Stats:")
+  log.info("\n* CI Stats:")
   test_failures.each do |branch, jobs|
-    line = "    * Branch: #{branch}"
+    line = "    * Branch: `#{branch}`"
     if jobs.empty?
-      line += ': No job failures found.'
+      line += ': No job failures found! :tada:'
       log.info(line)
     else
+      line += ' has the following failures:'
       log.info(line)
       jobs.sort.each do |job, dates|
         log.info("        * #{job}: #{dates.size} days")
@@ -228,6 +271,7 @@ def parse_options
     days: 30,
     log_level: :info,
     mode: ['all'],
+    include_list: false,
   }
   valid_modes = %w{ci pr issue all}
   OptionParser.new do |opts|
@@ -301,6 +345,13 @@ def parse_options
     ) do |v|
       options[:repo] = v
     end
+
+    opts.on(
+      '--include-list',
+      'Include list of relevant PRs/Issues (default: false)',
+    ) do
+      options[:include_list] = true
+    end
   end.parse!
   options[:mode] = %w{ci pr issue} if options[:mode].include?('all')
   options
@@ -320,12 +371,12 @@ def main
     "(Last #{options[:days]} days)_*",
   )
 
-  if options[:mode].include?('pr') || options[:mode].include?('issue')
+  if %w{pr issue}.any? { |x| options[:mode].include?(x) }
     stats = get_pr_and_issue_stats(client, options)
 
     %w{PR Issue}.each do |item|
       if options[:mode].include?(item.downcase)
-        print_pr_or_issue_stats(stats[item.downcase.to_sym], item)
+        print_pr_or_issue_stats(stats, item, options[:include_list])
       end
     end
   end
