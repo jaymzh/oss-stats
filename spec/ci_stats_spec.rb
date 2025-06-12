@@ -42,9 +42,20 @@ RSpec.describe 'ci_status' do
         hash_including(page: 1),
       ).and_return(
         [
+          # closed PR
           double(
-            created_at: Date.today - 10,
+            created_at: Date.today - 7,
             closed_at: Date.today - 5,
+            pull_request: double(
+              merged_at: Date.today - 5,
+            ),
+            updated_at: Date.today - 3,
+            labels: [],
+          ),
+          # open Issue
+          double(
+            created_at: Date.today - 7,
+            closed_at: nil,
             pull_request: nil,
             updated_at: Date.today - 3,
             labels: [],
@@ -58,9 +69,10 @@ RSpec.describe 'ci_status' do
 
       stats = get_pr_and_issue_stats(client, options)
 
-      expect(stats[:pr][:opened]).to eq(0)
-      expect(stats[:issue][:opened]).to eq(1)
-      expect(stats[:issue][:closed]).to eq(1)
+      expect(stats[:pr][:open]).to eq(0)
+      expect(stats[:pr][:closed]).to eq(1)
+      expect(stats[:issue][:open]).to eq(1)
+      expect(stats[:issue][:closed]).to eq(0)
     end
 
     it 'handles empty responses gracefully' do
@@ -68,8 +80,8 @@ RSpec.describe 'ci_status' do
 
       stats = get_pr_and_issue_stats(client, options)
 
-      expect(stats[:pr][:opened]).to eq(0)
-      expect(stats[:issue][:opened]).to eq(0)
+      expect(stats[:pr][:open]).to eq(0)
+      expect(stats[:issue][:open]).to eq(0)
     end
   end
 
