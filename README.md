@@ -111,6 +111,13 @@ of the code is generic and this could be adapted to other things.
 The idea here is to walk public repos and find tests that are not visible to
 the public and report on them.
 
+### Buildkite Provider
+
+You can also use this script to check pipeline visibility on Buildkite. This
+mode requires you to specify your Buildkite organization and provide an API
+token with `read_pipelines` scope. It constructs pipeline slugs based on a
+format string and checks their visibility.
+
 ## Misc Promises
 
 The [promises.rb](src/promises.rb) script allows you to add, edit, resolve,

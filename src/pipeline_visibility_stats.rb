@@ -10,7 +10,9 @@ require 'fileutils'
 require 'mixlib/shellout'
 
 require_relative 'lib/oss_stats/github_token'
+require_relative 'lib/oss_stats/buildkite_token'
 require_relative 'lib/oss_stats/log'
+require_relative 'lib/oss_stats/buildkite_client'
 
 def github_api_get(path, token)
   uri = URI("https://api.github.com#{path}")
@@ -92,13 +94,13 @@ end
 
 # Command-line options
 options = {
-  skip_patterns: %w{adhoc release},
-  repos: %w{},
-  org: 'chef',
+  assume_yes: false,
   log_level: :info,
   make_prs_for: [],
-  source_dir: nil,
-  assume_yes: false,
+  pipeline_format: '%{github_org}-%{repo}-%{branch}-verify',
+  provider: 'buildkite',
+  repos: %w{},
+  skip_patterns: %w{adhoc release},
   skip_repos: [],
   verify_only: true,
 }
@@ -129,9 +131,9 @@ OptionParser.new do |opts|
   ) { |v| options[:make_prs_for] += v }
 
   opts.on(
-    '--org ORG',
-    "GitHub org name. [default: #{options[:org]}]",
-  ) { |v| options[:org] = v }
+    '--github-org ORG',
+    'GitHub org name to look at all repos for. Required.',
+  ) { |v| options[:github_org] = v }
 
   opts.on(
     '-o FILE',
@@ -170,6 +172,29 @@ OptionParser.new do |opts|
     'By default we only look at verify pipelines as those are the only ' +
     'ones that run on PRs. Use --no-verify-only to change this',
   ) { |v| options[:verify_only] = v }
+
+  opts.on(
+    '--provider PROVIDER',
+    %w{expeditor buildkite},
+    'CI provider to use: buildkite or expeditor. ' +
+    "Default: #{options[:provider]}",
+  ) { |v| options[:provider] = v }
+
+  opts.on(
+    '--buildkite-token TOKEN',
+    'Buildkite API token (or use BUILDKITE_TOKEN env var)',
+  ) { |v| options[:buildkite_token] = v }
+
+  opts.on(
+    '--buildkite-org ORG',
+    'Buildkite organization slug',
+  ) { |v| options[:buildkite_org] = v }
+
+  opts.on(
+    '--pipeline-format FORMAT',
+    'Expected pipeline name format string. ' +
+    "Default: #{options[:pipeline_format]}",
+  ) { |v| options[:pipeline_format] = v }
 end.parse!
 
 log.level = options[:log_level] if options[:log_level]
@@ -183,6 +208,18 @@ if options[:output]
 end
 
 github_token = get_github_token!(options)
+buildkite_client = nil
+if options[:provider] == 'buildkite'
+  unless options[:buildkite_org]
+    raise ArgumentError, 'buildkite org required for buildkite provider'
+  end
+  buildkite_token = get_buildkite_token!(options)
+  buildkite_client = OssStats::BuildkiteClient.new(
+    buildkite_token, options[:buildkite_org]
+  )
+elsif options[:provider] != 'expeditor'
+  raise ArgumentError, "Unsupported provider: #{options[:provider]}"
+end
 
 total_pipeline_count = 0
 private_pipeline_count = 0
@@ -191,11 +228,11 @@ skipped_by_pattern = Hash.new(0)
 
 output(fh, "Pipeline Visibility Report #{Date.today}\n")
 if options[:repos].empty?
-  log.info("Fetching repos under '#{options[:org]}'...")
+  log.info("Fetching repos under '#{options[:github_org]}'...")
   page = 1
   loop do
     list = github_api_get(
-      "/orgs/#{options[:org]}/repos?per_page=100&page=#{page}",
+      "/orgs/#{options[:github_org]}/repos?per_page=100&page=#{page}",
       github_token,
     )
     break if list.empty?
@@ -215,7 +252,9 @@ end
 
 options[:repos].each do |repo|
   next if options[:skip_repos].include?(repo)
-  repo_info = github_api_get("/repos/#{options[:org]}/#{repo}", github_token)
+  repo_info = github_api_get(
+    "/repos/#{options[:github_org]}/#{repo}", github_token
+  )
   if repo_info['private']
     log.debug("Skipping private repo: #{repo}")
     next
@@ -223,123 +262,185 @@ options[:repos].each do |repo|
 
   print('.') if fh
 
-  content = get_expeditor_config(options[:org], repo, github_token)
-  unless content
-    log.debug("No expeditor config for #{repo}")
-    next
-  end
+  if options[:provider] == 'expeditor'
+    content = get_expeditor_config(options[:github_org], repo, github_token)
+    unless content
+      log.debug("No expeditor config for #{repo}")
+      next
+    end
 
-  begin
-    config = YAML.safe_load(content)
-  rescue Psych::SyntaxError => e
-    log.warn("Skipping #{repo} due to YAML error: #{e}")
-    next
-  end
+    begin
+      config = YAML.safe_load(content)
+    rescue Psych::SyntaxError => e
+      log.warn("Skipping #{repo} due to YAML error: #{e}")
+      next
+    end
 
-  pipelines = config['pipelines'] || []
-  repo_missing_public = []
+    pipelines = config['pipelines'] || []
+    repo_missing_public_gh = []
 
-  # It's a bummer to walk through this twice, but it's a very small list
-  # and we need all the names to mmatch _private pipelines
-  pipeline_names = pipelines.map do |pl|
-    pl.is_a?(String) ? pl : pl.keys
-  end.flatten
+    pipeline_names = pipelines.map do |pl|
+      pl.is_a?(String) ? pl : pl.keys
+    end.flatten
 
-  pipelines.each do |pipeline_block|
-    pipeline_block = { pipeline_block => {} } if pipeline_block.is_a?(String)
+    pipelines.each do |pipeline_block|
+      pipeline_block = { pipeline_block => {} } if pipeline_block.is_a?(String)
 
-    pipeline_block.each do |pipeline_name, pipeline_details|
-      if options[:verify_only] && !pipeline_name.start_with?('verify')
-        log.debug("Skipping non-verify pipeline #{pipeline_name}")
-        next
-      end
-
-      # if we have a private version of a pipeline, allow it if there's
-      # also a public
-      if pipeline_name.end_with?('_private')
-        pubname = pipeline_name.gsub('_private', '')
-        if pipeline_names.include?(pubname)
-          log.debug("Skipping #{pipeline_name}, #{pubname} exists")
-          skipped_by_pattern[pipeline_name] += 1
+      pipeline_block.each do |pipeline_name, pipeline_details|
+        if options[:verify_only] && !pipeline_name.start_with?('verify')
+          log.debug("Skipping non-verify pipeline #{pipeline_name}")
           next
         end
-        log.warn("There is a #{pipeline_name} pipeline but no #{pubname}")
+
+        if pipeline_name.end_with?('_private')
+          pubname = pipeline_name.gsub('_private', '')
+          if pipeline_names.include?(pubname)
+            log.debug("Skipping #{pipeline_name}, #{pubname} exists")
+            skipped_by_pattern[pipeline_name] += 1
+            next
+          end
+          log.warn("There is a #{pipeline_name} pipeline but no #{pubname}")
+        end
+
+        skip_matched = options[:skip_patterns].find do |pat|
+          pipeline_name.include?(pat)
+        end
+
+        if skip_matched
+          skipped_by_pattern[skip_matched] += 1
+          next
+        end
+
+        env = pipeline_details['env'] || []
+        if env.any? { |i| i['ADHOC'] }
+          log.warn(
+            "#{pipeline_name} is marked as adhoc but isn't named as such",
+          )
+          skipped_by_pattern['adhoc'] += 1
+          next
+        end
+
+        total_pipeline_count += 1
+        if !pipeline_details.is_a?(Hash) || pipeline_details['public'] != true
+          repo_missing_public_gh << pipeline_name
+          private_pipeline_count += 1
+        end
       end
+    end
+
+    next if repo_missing_public_gh.empty?
+    output(fh, "* #{repo}")
+    repo_missing_public_gh.each do |pname|
+      output(fh, "    * #{pname}")
+    end
+    repos_with_private += 1
+
+    # PR creation logic (specific to Chef Expeditor)
+    next unless options[:make_prs_for].any? && options[:source_dir]
+    pipelines_to_fix = repo_missing_public_gh & options[:make_prs_for]
+    next if pipelines_to_fix.empty?
+
+    patched = patch_yaml_public_flag!(content, pipelines_to_fix)
+    next unless patched
+
+    repo_path = File.join(options[:source_dir], repo)
+    unless Dir.exist?(repo_path)
+      run_cmd!(
+        ['sj', 'sclone', "#{options[:github_org]}/#{repo}"],
+        cwd: options[:source_dir],
+      )
+    end
+
+    run_cmd!(%w{sj feature expeditor-public}, cwd: repo_path, retries: 2)
+    expeditor_path = File.join(repo_path, '.expeditor', 'config.yml')
+    FileUtils.mkdir_p(File.dirname(expeditor_path))
+    File.write(expeditor_path, patched)
+
+    run_cmd!(['git', 'add', expeditor_path], cwd: repo_path)
+    run_cmd!(
+      [
+        'git',
+        'commit',
+        '-sm',
+        "make pipelines public: #{pipelines_to_fix.join(', ')}",
+      ],
+      cwd: repo_path,
+    )
+
+    unless options[:assume_yes]
+      puts "\nDiff for #{repo}:"
+      run_cmd!(
+        ['git', '--no-pager', 'diff', 'HEAD~1'], cwd: repo_path
+      )
+      print 'Create PR? [y/N] '
+      confirm = $stdin.gets.strip.downcase
+      next unless confirm == 'y'
+    end
+
+    run_cmd!(%w{sj spush}, cwd: repo_path, retries: 2)
+    run_cmd!(%w{sj spr}, cwd: repo_path, retries: 2)
+
+  elsif options[:provider] == 'buildkite'
+    default_branch = repo_info['default_branch']
+    unless default_branch
+      log.warn(
+        'Could not determine default branch for ' +
+        " #{options[:github_org]}/#{repo}. Skipping Buildkite check for " +
+        'this repo.',
+      )
+      next
+    end
+    branches_to_check = [default_branch]
+    repo_missing_public_bk = []
+
+    branches_to_check.each do |branch|
+      pipeline_slug_str = format(options[:pipeline_format],
+github_org: options[:github_org], org: options[:buildkite_org], repo:, branch:)
 
       skip_matched = options[:skip_patterns].find do |pat|
-        pipeline_name.include?(pat)
+        pipeline_slug_str.include?(pat)
       end
-
       if skip_matched
+        log.debug(
+          "Skipping Buildkite pipeline #{pipeline_slug_str} due to " +
+          "pattern: #{skip_matched}",
+        )
         skipped_by_pattern[skip_matched] += 1
         next
       end
 
-      env = pipeline_details['env'] || []
-      if env.any? { |i| i['ADHOC'] }
-        log.warn("#{pipeline_name} is marked as adhoc but isn't named as such")
-        skipped_by_pattern['adhoc'] += 1
-        next
-      end
-
       total_pipeline_count += 1
-      if !pipeline_details.is_a?(Hash) || pipeline_details['public'] != true
-        repo_missing_public << pipeline_name
-        private_pipeline_count += 1
+      begin
+        log.debug("Checking Buildkite pipeline: #{pipeline_slug_str}")
+        pipeline = buildkite_client.get_pipeline(pipeline_slug_str)
+        if pipeline.nil?
+          log.debug("Buildkite pipeline #{pipeline_slug_str} does not exist")
+          repo_missing_public_bk << "#{pipeline_slug_str} (not found)"
+          private_pipeline_count += 1
+        elsif pipeline['visibility'].downcase != 'public'
+          log.warn("Buildkite pipeline #{pipeline_slug_str} is #{visibility}")
+          repo_missing_public_bk << "#{pipeline_slug_str} (#{visibility})"
+          private_pipeline_count += 1
+        else
+          log.debug("Buildkite pipeline #{pipeline_slug_str} is public.")
+        end
+      rescue StandardError => e
+        log.error(
+          "Error fetching Buildkite pipeline #{pipeline_slug_str}: " +
+          e.message,
+        )
+        repo_missing_public_bk << "#{pipeline_slug_str} (Error: #{e.class})"
       end
     end
+
+    unless repo_missing_public_bk.empty?
+      output(fh, "* #{repo}")
+      repo_missing_public_bk.each do |pname|
+        output(fh, "    * #{pname}")
+      end
+      repos_with_private += 1
+    end
   end
-
-  next if repo_missing_public.empty?
-  output(fh, "* #{repo}")
-  repo_missing_public.each do |pname|
-    output(fh, "    * #{pname}")
-  end
-  repos_with_private += 1
-
-  next unless options[:make_prs_for].any? && options[:source_dir]
-  pipelines_to_fix = repo_missing_public & options[:make_prs_for]
-  next if pipelines_to_fix.empty?
-
-  patched = patch_yaml_public_flag!(content, pipelines_to_fix)
-  next unless patched
-
-  repo_path = File.join(options[:source_dir], repo)
-  unless Dir.exist?(repo_path)
-    run_cmd!(
-      ['sj', 'sclone', "#{options[:org]}/#{repo}"],
-      cwd: options[:source_dir],
-    )
-  end
-
-  run_cmd!(%w{sj feature expeditor-public}, cwd: repo_path, retries: 2)
-  expeditor_path = File.join(repo_path, '.expeditor', 'config.yml')
-  FileUtils.mkdir_p(File.dirname(expeditor_path))
-  File.write(expeditor_path, patched)
-
-  run_cmd!(['git', 'add', expeditor_path], cwd: repo_path)
-  run_cmd!(
-    [
-      'git',
-      'commit',
-      '-sm',
-      "make pipelines public: #{pipelines_to_fix.join(', ')}",
-    ],
-    cwd: repo_path,
-  )
-
-  unless options[:assume_yes]
-    puts "\nDiff for #{repo}:"
-    run_cmd!(
-      ['git', '--no-pager', 'diff', 'HEAD~1'], cwd: repo_path
-    )
-    print 'Create PR? [y/N] '
-    confirm = $stdin.gets.strip.downcase
-    next unless confirm == 'y'
-  end
-
-  run_cmd!(%w{sj spush}, cwd: repo_path, retries: 2)
-  run_cmd!(%w{sj spr}, cwd: repo_path, retries: 2)
 end
 
 if total_pipeline_count > 0
