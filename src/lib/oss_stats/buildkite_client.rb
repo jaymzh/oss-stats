@@ -33,15 +33,18 @@ module OssStats
         elsif pipeline_data.nil? && response_data['errors']
           # Errors occurred, already logged by execute_graphql_query,
           # but we might want to note the slug it failed for.
-          logger.warn("Failed to fetch pipeline #{@organization_slug}/#{pipeline_slug} " +
-                      "due to API errors (see previous error logs).")
+          warn_msg = "Failed to fetch pipeline " \
+                     "#{@organization_slug}/#{pipeline_slug} due to API errors " \
+                     "(see previous error logs)."
+          logger.warn(warn_msg)
         end
         pipeline_data
       rescue StandardError => e
         # This will catch errors raised by execute_graphql_query
         # or any other unexpected error during the process.
-        logger.error("Error in get_pipeline for slug " +
-                     "#{@organization_slug}/#{pipeline_slug}: #{e.message}")
+        error_msg = "Error in get_pipeline for slug " \
+                    "#{@organization_slug}/#{pipeline_slug}: #{e.message}"
+        logger.error(error_msg)
         # Optionally re-raise or handle as per application's error policy
         raise
       end
@@ -121,7 +124,7 @@ module OssStats
         response = http.request(request)
 
         unless response.is_a?(Net::HTTPSuccess)
-          error_message = "Buildkite API request failed with status " +
+          error_message = "Buildkite API request failed with status " \
                           "#{response.code}: #{response.message}"
           logger.error(error_message)
           raise error_message

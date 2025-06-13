@@ -146,9 +146,7 @@ def process_expeditor_pipelines(repo_info, options, github_token, log)
 
       env = pipeline_details['env'] || []
       if env.any? { |i| i['ADHOC'] }
-        log.warn(
-          "#{pipeline_name} is marked as adhoc but isn't named as such",
-        )
+        log.warn("#{pipeline_name} is marked as adhoc but not named so")
         skipped_by_pattern['adhoc'] += 1
         next
       end
@@ -181,13 +179,9 @@ def process_expeditor_pipelines(repo_info, options, github_token, log)
         File.write(expeditor_path, patched)
 
         run_cmd!(['git', 'add', expeditor_path], cwd: repo_path)
+        commit_message = "make pipelines public: #{pipelines_to_fix.join(', ')}"
         run_cmd!(
-          [
-            'git',
-            'commit',
-            '-sm',
-            "make pipelines public: #{pipelines_to_fix.join(', ')}",
-          ],
+          ['git', 'commit', '-sm', commit_message],
           cwd: repo_path,
         )
 
@@ -240,7 +234,8 @@ def process_buildkite_pipelines( # rubocop:disable Metrics/ParameterLists
     pipelines_for_this_repo_direct.each do |p_info|
       slug = p_info[:slug]
       visibility = p_info[:visibility] # Already known from initial scan
-      log.debug("Direct pipeline: #{options[:buildkite_org]}/#{slug}, visibility: #{visibility}")
+      log.debug("Direct pipeline: #{options[:buildkite_org]}/#{slug}, " +
+                "vis: #{visibility}")
 
       skip = options[:skip_patterns].find { |pat| slug.include?(pat) }
       if skip
@@ -266,49 +261,9 @@ def process_buildkite_pipelines( # rubocop:disable Metrics/ParameterLists
   # Section 2: PR Analysis Logic
   log.info("Starting BK PR analysis for #{repo_name} (URL: #{repo_url})")
   recent_prs = []
-
-    primary_org_pipelines_for_repo.each do |pipeline_info|
-      pipeline_slug = pipeline_info[:slug]
-      visibility = pipeline_info[:visibility] # Already known from all_pipelines
-
-      log.debug("Processing directly associated pipeline #{options[:buildkite_org]}/#{pipeline_slug} " +
-                "for #{repo_url}")
-
-      skip_matched = options[:skip_patterns].find do |pat|
-        pipeline_slug.include?(pat)
-      end
-
-      if skip_matched
-        log.debug("Skipping pipeline #{pipeline_slug} due to pattern: " +
-                  skip_matched.to_s)
-        skipped_by_pattern[pipeline_slug] += 1 # Use slug for pattern key
-        next
-      end
-
-      total_pipeline_count += 1 # Count towards total if not skipped
-      unless visibility.casecmp('public').zero?
-        report_key = "#{options[:buildkite_org]}/#{pipeline_slug}"
-        if reported_slugs_for_repo.add?(report_key)
-          log.warn("Pipeline #{report_key} is #{visibility} (direct)")
-          repo_missing_public_bk << "#{pipeline_slug} (#{visibility}) (Org: #{options[:buildkite_org]})"
-          private_pipeline_count += 1
-        else
-          log.debug("Pipeline #{report_key} (direct) already noted as " +
-                    "private for #{repo_url}")
-        end
-      else
-        log.debug("Pipeline #{options[:buildkite_org]}/#{pipeline_slug} (direct) is public.")
-      end
-    end
-  else
-    log.debug("No Buildkite pipelines found for repo #{repo_url} in " +
-              'primary org data (direct association).')
-  end
-
-  # --- PR Analysis Logic ---
-  log.info("Starting Buildkite PR analysis for #{repo_url}")
+  # Correct PR fetching logic starts here
   begin
-    prs_path = "/repos/#{options[:github_org]}/#{repo}/pulls"
+    prs_path = "/repos/#{options[:github_org]}/#{repo_name}/pulls" # Use repo_name
     pr_query_params = {
       state: 'all', sort: 'updated', direction: 'desc', per_page: 3,
     }
@@ -325,12 +280,13 @@ def process_buildkite_pipelines( # rubocop:disable Metrics/ParameterLists
     commit_sha = pr_data.dig('head', 'sha')
 
     unless commit_sha
-      log.warn("Could not find commit SHA for PR ##{pr_number} in #{repo_url}. Skipping.")
+      log.warn("Could not find commit SHA for PR ##{pr_number} in #{repo_name}. " + # Use repo_name
+               "Skipping.")
       next
     end
-    log.info("Analyzing PR ##{pr_number} (SHA: #{commit_sha}) in #{repo_url}")
+    log.info("Analyzing PR ##{pr_number} (SHA: #{commit_sha}) in #{repo_name}") # Use repo_name
 
-    statuses_path = "/repos/#{options[:github_org]}/#{repo}/commits/#{commit_sha}/statuses"
+    statuses_path = "/repos/#{options[:github_org]}/#{repo_name}/commits/#{commit_sha}/statuses" # Use repo_name
     statuses = []
     begin
       log.debug("Fetching statuses for commit #{commit_sha} (PR ##{pr_number})")
@@ -374,32 +330,36 @@ def process_buildkite_pipelines( # rubocop:disable Metrics/ParameterLists
           log.debug("Visibility for #{current_pipeline_org}/#{current_pipeline_slug} " +
                     "from initial scan: #{visibility}")
         else
-          log.warn("Slug #{current_pipeline_slug} from primary org " +
-                   "#{options[:buildkite_org]} not in initial scan. Querying directly.")
+          log.warn("Slug #{current_pipeline_slug} (primary org: " +
+                   "#{options[:buildkite_org]}) not in initial scan. Querying.")
           discovery_method = 'queried directly'
         end
       else # Different Buildkite organization
-        discovery_method = 'queried directly'
-        log.info("Pipeline is from a different org: #{current_pipeline_org}. Ensuring client exists.")
-        client_to_use = buildkite_clients_by_org.fetch(current_pipeline_org) do |org_to_fetch|
-          log.info("Creating new Buildkite client for org: #{org_to_fetch}")
-          # Ensure buildkite_token is available in this scope
-          buildkite_clients_by_org[org_to_fetch] = OssStats::BuildkiteClient.new(buildkite_token, org_to_fetch)
+        # Corrected: was 'queried directly', now more specific
+        discovery_method = 'queried directly (secondary org)'
+        log.info("Pipeline from different org: #{current_pipeline_org}. Ensuring client.")
+        client_to_use = buildkite_clients_by_org.fetch(current_pipeline_org) do |org_key|
+          log.info("Creating new BK client for org: #{org_key}")
+          buildkite_clients_by_org[org_key] = OssStats::BuildkiteClient.new(buildkite_token, org_key)
         end
       end
 
       if visibility.nil? && client_to_use
         begin
-          log.debug("Querying API for #{current_pipeline_org}/#{current_pipeline_slug}")
+          log.debug("Querying API for pipeline " \
+                    "#{current_pipeline_org}/#{current_pipeline_slug}")
           pipeline_data = client_to_use.get_pipeline(current_pipeline_slug)
           visibility = pipeline_data&.dig('visibility')
           discovery_method = 'queried directly' if discovery_method.empty?
         rescue StandardError => e
-          log.error("Error querying API for #{current_pipeline_org}/#{current_pipeline_slug}: #{e.message}")
+          log_msg = "API error for #{current_pipeline_org}/" \
+                    "#{current_pipeline_slug}: #{e.message}"
+          log.error(log_msg)
           discovery_method = 'API error'
         end
       elsif visibility.nil? && client_to_use.nil? && current_pipeline_org == options[:buildkite_org]
-        log.error("Failed to get client for primary org #{options[:buildkite_org]} to query #{current_pipeline_slug}")
+        log.error("Failed to get client for primary org " \
+                  "#{options[:buildkite_org]} to query #{current_pipeline_slug}")
         discovery_method = 'client error'
       end
 
@@ -408,26 +368,28 @@ def process_buildkite_pipelines( # rubocop:disable Metrics/ParameterLists
       source_info += ", #{discovery_method})"
 
       if visibility
-        log.info("Determined visibility for #{current_pipeline_org}/#{current_pipeline_slug} " +
+        log.info("Visibility for #{current_pipeline_org}/#{current_pipeline_slug} " +
                  "#{source_info}: #{visibility}")
         unless visibility.casecmp('public').zero?
           report_key = "#{current_pipeline_org}/#{current_pipeline_slug}"
-          if reported_slugs_for_repo.add?(report_key)
+          if local_reported_slugs.add?(report_key) # Use local_reported_slugs
             entry_msg = "#{current_pipeline_slug} (#{visibility}) #{source_info}"
-            log.warn("Private pipeline found via PR status: #{report_key} is #{visibility}")
-            repo_missing_public_bk << entry_msg
+            log.warn("Private pipeline via PR: #{report_key} is #{visibility}. " +
+                     "Info: #{source_info}")
+            local_repo_missing_public_bk << entry_msg # Use local_repo_missing_public_bk
             private_pipeline_count += 1
           else
             log.debug("Pipeline #{report_key} (via PR) already reported as private.")
           end
         end
       else
-        log.warn("Could not determine visibility for pipeline " +
-                 "#{current_pipeline_org}/#{current_pipeline_slug} #{source_info}.")
+        log.warn("Could not determine visibility for pipeline " \
+                 "#{current_pipeline_org}/#{current_pipeline_slug} " \
+                 "#{source_info}.")
       end
     end
   end
-  repo_missing_public_bk
+  local_repo_missing_public_bk # Use local_repo_missing_public_bk
 end
 
 # Command-line options
@@ -482,15 +444,15 @@ OptionParser.new do |opts|
   opts.on(
     '--repos REPO',
     Array,
-    'GitHub repositories name. Can specify comma-separated list and/or ' +
-    ' use the option multiple times. Leave blank for all repos in the org.',
+    'GitHub repositories name. Can specify comma-separated list and/or use ' +
+    'the option multiple times. Leave blank for all repos in the org.',
   ) { |v| options[:repos] += v }
 
   opts.on(
     '--skip PATTERN',
     Array,
     'Pipeline name substring to skip. Can specify a comma-separated list ' +
-    ' and/or use the option multiple times. ' +
+    'and/or use the option multiple times. ' +
     "[default: #{options[:skip_patterns].join(',')}]",
   ) { |v| options[:skip_patterns] += v }
 
@@ -507,15 +469,15 @@ OptionParser.new do |opts|
 
   opts.on(
     '--[no-]verify-only',
-    'By default we only look at verify pipelines as those are the only ' +
-    'ones that run on PRs. Use --no-verify-only to change this',
+    'By default we only look at verify pipelines as those are the only ones ' +
+    'that run on PRs. Use --no-verify-only to change this.',
   ) { |v| options[:verify_only] = v }
 
   opts.on(
     '--provider PROVIDER',
     %w{expeditor buildkite},
-    'CI provider to use: buildkite or expeditor. ' +
-    "Default: #{options[:provider]}",
+    'CI provider to use: buildkite or expeditor. Default: ' +
+    options[:provider].to_s, # Ensure string for concatenation
   ) { |v| options[:provider] = v }
 
   opts.on(
@@ -530,8 +492,8 @@ OptionParser.new do |opts|
 
   opts.on(
     '--pipeline-format FORMAT',
-    'Expected pipeline name format string. ' +
-    "Default: #{options[:pipeline_format]}",
+    'Expected pipeline name format string. Default: ' +
+    options[:pipeline_format].to_s, # Ensure string for concatenation
   ) { |v| options[:pipeline_format] = v }
 end.parse!
 
@@ -687,11 +649,13 @@ if total_pipeline_count > 0
     (private_pipeline_count.to_f / total_pipeline_count.to_f) * 100
   ).round(2)
   output(fh, "\nTotal percentage of private pipelines: #{percentage_private}%")
-  output(
-    fh,
-    "  --> #{private_pipeline_count} out of #{total_pipeline_count} " +
-    "across #{repos_with_private} repos",
+  summary_line = format(
+    '  --> %<private>d out of %<total>d across %<repos>d repos',
+    private: private_pipeline_count,
+    total: total_pipeline_count,
+    repos: repos_with_private,
   )
+  output(fh, summary_line)
 
   if skipped_by_pattern.any?
     output(fh, '  --> Skipped pipelines:')
