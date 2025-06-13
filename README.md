@@ -77,6 +77,10 @@ $ ./src/ci_stats.rb --days 7 --branches chef-18,main --org chef --repo chef
     * Branch: chef18: No job failures found.
 ```
 
+You can instead make a configuration file for `ci_stats` with a list of
+organizations and repositories to run on by default. See
+[examples/ci_stats_config.rb](examples/ci_stats_config.rb) for details.
+
 As you can see the output is in markdown format suitable for posting in Slack,
 or storing in Github.
 
@@ -126,3 +130,12 @@ $ promises.rb
 
 You likely will probably want a config file for this as well and a sample
 is provided in [examples/promises_config.rb](examples/promises_config.rb).
+
+## Your GitHub Token
+
+Everything in this repo looks for your GitHub Access Token in the following
+places, in order:
+
+1. The `--github-token` command-line argument
+1. The `$GITHUB_TOKEN` environment variable
+1. It'll also parse it from `~/.config/gh/hosts.yml` if you use `gh`.

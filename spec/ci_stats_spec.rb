@@ -1,6 +1,7 @@
 require 'rspec'
 require 'octokit'
 require_relative '../src/ci_stats'
+require_relative '../src/lib/oss_stats/ci_stats_config'
 
 RSpec.describe 'ci_status' do
   let(:client) { instance_double(Octokit::Client) }
@@ -24,14 +25,26 @@ RSpec.describe 'ci_status' do
   end
 
   describe '#rate_limited_sleep' do
+    after(:each) do
+      OssStats::CiStatsConfig.limit_gh_ops_per_minute = nil
+    end
+
     it 'sleeps for the correct amount of time based on the rate limit' do
+      OssStats::CiStatsConfig.limit_gh_ops_per_minute = 60
       expect(self).to receive(:sleep).with(1.0)
-      rate_limited_sleep(limit_gh_ops_per_minute: 60)
+      rate_limited_sleep
     end
 
     it 'does not sleep if the rate limit is not set' do
+      OssStats::CiStatsConfig.limit_gh_ops_per_minute = nil
       expect(self).not_to receive(:sleep)
-      rate_limited_sleep({})
+      rate_limited_sleep
+    end
+
+    it 'does not sleep if the rate limit is 0' do
+      OssStats::CiStatsConfig.limit_gh_ops_per_minute = 0
+      expect(self).not_to receive(:sleep)
+      rate_limited_sleep
     end
   end
 
@@ -112,7 +125,8 @@ RSpec.describe 'ci_status' do
 
       failed_tests = get_failed_tests_from_ci(client, options)
 
-      expect(failed_tests['main']['Test Job']).to include(Date.today - 5)
+      expect(failed_tests['main']['Test Workflow / Test Job'])
+        .to include(Date.today - 5)
     end
 
     it 'handles no failures gracefully' do
