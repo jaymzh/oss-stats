@@ -9,6 +9,39 @@ require 'set'
 require_relative 'lib/oss_stats/log'
 require_relative 'lib/oss_stats/github_token'
 
+# Fetches all 'issues' (which can include PRs) from a repository,
+# paginating until items are older than the cutoff_date or no more items are found.
+def get_github_items(client, repo, cutoff_date)
+  all_items = []
+  page = 1
+  loop do
+    items = client.issues(repo, state: 'all', per_page: 100, page:)
+    break if items.empty?
+
+    items_before_cutoff_in_this_page = false
+    items.each do |item|
+      # Check if any item in the current page is within the cutoff_date
+      # This helps in deciding if we need to fetch the next page
+      created_date = item.created_at.to_date
+      closed_date = item.closed_at&.to_date
+      if created_date >= cutoff_date || (closed_date && closed_date >= cutoff_date)
+        items_before_cutoff_in_this_page = true
+      end
+      all_items << item
+    end
+
+    # If all items in the current page are older than the cutoff_date,
+    # we can stop paginating. However, we've already added them to all_items.
+    # The filtering of these items will happen during statistics calculation.
+    # The primary goal here is to optimize by not fetching unnecessary pages.
+    break unless items_before_cutoff_in_this_page
+
+    page += 1
+  end
+  all_items
+end
+
+# Utility function to sleep if rate limiting is specified
 def rate_limited_sleep(options)
   if options[:limit_gh_ops_per_minute]&.positive?
     sleep_time = 60.0 / options[:limit_gh_ops_per_minute]
@@ -17,105 +50,119 @@ def rate_limited_sleep(options)
   end
 end
 
-# Fetch PR and Issue stats from GitHub in a single API call
-def get_pr_and_issue_stats(client, options)
-  repo = "#{options[:org]}/#{options[:repo]}"
-  cutoff_date = Date.today - options[:days]
-  pr_stats = {
-    open: 0, closed: 0, total_close_time: 0.0, oldest_open: nil,
-    oldest_open_days: 0, oldest_open_last_activity: 0, stale_count: 0,
-    opened_this_period: 0
-  }
-  issue_stats = {
-    open: 0, closed: 0, total_close_time: 0.0, oldest_open: nil,
-    oldest_open_days: 0, oldest_open_last_activity: 0, stale_count: 0,
-    opened_this_period: 0
-  }
-  prs = {
-    open: [],
-    closed: [],
-  }
-  issues = {
-    open: [],
-    closed: [],
-  }
-  stale_cutoff = Date.today - 30
+# Updated get_github_items to use options and include rate_limited_sleep
+# Fetches all 'issues' (which can include PRs) from a repository.
+def get_github_items(client, repo, options)
+  all_fetched_items = []
   page = 1
+  cutoff_date = Date.today - options[:days]
 
   loop do
-    items = client.issues(repo, state: 'all', per_page: 100, page:)
-    break if items.empty?
+    log.debug("Fetching page #{page} of items for #{repo}")
+    current_page_items = client.issues(repo, state: 'all', per_page: 100, page:)
+    rate_limited_sleep(options) # Respect rate limits
+    break if current_page_items.empty?
 
-    all_items_before_cutoff = true
+    # This optimization helps stop fetching pages if all items on a page are older than the cutoff.
+    # It assumes items are roughly sorted by update/creation time by GitHub's API for 'all' state.
+    # A more robust check might involve checking each item's relevant dates.
+    last_item_on_page = current_page_items.last
+    # Use updated_at as a general proxy for activity. If an item was updated recently,
+    # it could be relevant, or new items could be on later pages.
+    # If the last item on the page was updated before our cutoff,
+    # it's less likely (though not impossible) that subsequent pages will have relevant items.
+    # This is an optimization and might need refinement for strict accuracy in all edge cases.
+    break if last_item_on_page.updated_at.to_date < cutoff_date && page > 1 # Avoid breaking on first page
 
-    items.each do |item|
-      created_date = item.created_at.to_date
-      closed_date = item.closed_at&.to_date
-      is_pr = !item.pull_request.nil?
-      last_comment_date = item.updated_at.to_date
-      labels = item.labels.map(&:name)
-      days_open = (Date.today - created_date).to_i
-      days_since_last_activity = (Date.today - last_comment_date).to_i
+    all_fetched_items.concat(current_page_items)
+    page += 1
+  end
+  all_fetched_items
+end
 
-      log.debug(
-        "Checking item: #{is_pr ? 'PR' : 'Issue'}, " +
-        "Created at #{created_date}, Closed at #{closed_date || 'N/A'}",
-      )
+# Calculates statistics for a list of GitHub items (PRs or issues).
+def calculate_item_stats(items_list, item_type, options) # item_type is 'pr' or 'issue'
+  stats = {
+    open: 0, closed: 0, total_close_time: 0.0, oldest_open: nil,
+    oldest_open_days: 0, oldest_open_last_activity: 0, stale_count: 0,
+    opened_this_period: 0
+  }
+  item_collection = { open: [], closed: [] } # Renamed from 'list' to avoid conflict
+  cutoff_date = Date.today - options[:days]
+  stale_cutoff = Date.today - 30 # 30 days for staleness
 
-      stats = is_pr ? pr_stats : issue_stats
-      list = is_pr ? prs : issues
+  items_list.each do |item|
+    is_item_pr = !item.pull_request.nil?
+    current_item_type = is_item_pr ? 'pr' : 'issue'
 
-      # we count open as open and not waiting on contributor
-      if closed_date.nil? && !labels.include?('Status: Waiting on Contributor')
-        if stats[:oldest_open].nil? || created_date < stats[:oldest_open]
-          stats[:oldest_open] = created_date
-          stats[:oldest_open_days] = days_open
-          stats[:oldest_open_last_activity] = days_since_last_activity
-        end
+    next unless current_item_type == item_type # Process only the specified item_type
 
-        if last_comment_date < stale_cutoff
-          stats[:stale_count] += 1
-        end
+    created_date = item.created_at.to_date
+    closed_date = item.closed_at&.to_date
+    last_comment_date = item.updated_at.to_date # Using updated_at for last activity
+    labels = item.labels.map(&:name)
+    days_open = (Date.today - created_date).to_i
+    days_since_last_activity = (Date.today - last_comment_date).to_i
 
-        stats[:open] += 1
-        # Count those opened recently separately
-        if created_date >= cutoff_date
-          stats[:opened_this_period] += 1
-          list[:open] << item
-          all_items_before_cutoff = false
-          # if it's opened in the right period, but not yet closed,
-          # we count that as "not closed this week/month/whatever"
-        end
+    log.debug(
+      "Calculating stats for #{item_type} ##{item.number}: " +
+      "Created at #{created_date}, Closed at #{closed_date || 'N/A'}",
+    )
+
+    # Calculate stats for open items
+    if closed_date.nil? && !labels.include?('Status: Waiting on Contributor')
+      if stats[:oldest_open].nil? || created_date < stats[:oldest_open]
+        stats[:oldest_open] = created_date
+        stats[:oldest_open_days] = days_open
+        stats[:oldest_open_last_activity] = days_since_last_activity
       end
 
-      # Only count as closed if it was actually closed within the cutoff window
-      next unless closed_date && closed_date >= cutoff_date
+      stats[:stale_count] += 1 if last_comment_date < stale_cutoff
+      stats[:open] += 1
 
-      # if it's a PR make sure it was closed by merging
-      next unless !is_pr || item.pull_request.merged_at
-
-      # anything closed this week counts as closed regardless of when it
-      # was opened
-      list[:closed] << item
-      stats[:closed] += 1
-      stats[:total_close_time] += (item.closed_at - item.created_at) / 3600.0
-      all_items_before_cutoff = false
+      if created_date >= cutoff_date
+        stats[:opened_this_period] += 1
+        item_collection[:open] << item
+      end
     end
 
-    page += 1
-    break if all_items_before_cutoff
+    # Calculate stats for closed items
+    next unless closed_date && closed_date >= cutoff_date # Must be closed within the cutoff window
+
+    # If it's a PR, ensure it was closed by merging
+    next if is_item_pr && item.pull_request.merged_at.nil?
+
+    item_collection[:closed] << item
+    stats[:closed] += 1
+    stats[:total_close_time] += (item.closed_at - item.created_at) / 3600.0 # in hours
   end
 
-  pr_stats[:avg_time_to_close_hours] =
-    pr_stats[:closed] == 0 ? 0 : pr_stats[:total_close_time] / pr_stats[:closed]
-  issue_stats[:avg_time_to_close_hours] =
-    if issue_stats[:closed] == 0
-      0
-    else
-      issue_stats[:total_close_time] / issue_stats[:closed]
-    end
+  stats[:avg_time_to_close_hours] =
+    stats[:closed] == 0 ? 0 : stats[:total_close_time] / stats[:closed].to_f
 
-  { pr: pr_stats, issue: issue_stats, pr_list: prs, issue_list: issues }
+  { stats:, list: item_collection }
+end
+
+# Refactored function to use helper methods
+def get_pr_and_issue_stats(client, options)
+  repo = "#{options[:org]}/#{options[:repo]}"
+
+  # Fetch all items (PRs and issues).
+  # The get_github_items function fetches everything, and calculate_item_stats filters by type.
+  all_items = get_github_items(client, repo, options) # Pass options now
+
+  # Calculate PR stats
+  pr_result = calculate_item_stats(all_items, 'pr', options)
+
+  # Calculate Issue stats
+  issue_result = calculate_item_stats(all_items, 'issue', options)
+
+  {
+    pr: pr_result[:stats],
+    issue: issue_result[:stats],
+    pr_list: pr_result[:list],
+    issue_list: issue_result[:list]
+  }
 end
 
 def get_failed_tests_from_ci(client, options)

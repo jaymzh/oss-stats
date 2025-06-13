@@ -111,6 +111,33 @@ of the code is generic and this could be adapted to other things.
 The idea here is to walk public repos and find tests that are not visible to
 the public and report on them.
 
+### Buildkite Provider
+
+You can also use this script to check pipeline visibility on Buildkite. This mode requires you to specify your Buildkite organization and provide an API token with `read_pipelines` scope. It constructs pipeline slugs based on a format string and checks their visibility.
+
+**Command-line options for Buildkite:**
+
+*   `--provider buildkite`: Switches the script to use the Buildkite provider.
+*   `--buildkite-token TOKEN`: Your Buildkite API token. Can also be set using the `BUILDKITE_TOKEN` environment variable.
+*   `--buildkite-org SLUG`: The slug of your organization on Buildkite. Can also be set using the `BUILDKITE_ORG` environment variable.
+*   `--pipeline-format FORMAT_STRING`: A string that defines how pipeline slugs are constructed. It uses `%{org}`, `%{repo}`, and `%{branch}` as placeholders.
+    *   Default: `%{org}-%{repo}-%{branch}-verify`
+    *   Example: For an organization `my-org`, repository `my-repo`, and branch `main`, the default format would generate `my-org-my-repo-main-verify`.
+
+**Example usage for Buildkite:**
+
+```shell
+./src/pipeline_visibility_stats.rb \
+  --provider buildkite \
+  --buildkite-org "your-buildkite-org-slug" \
+  --buildkite-token "your-buildkite-api-token" \
+  --repos "repo1,repo2" \
+  --org "your-github-org" \
+  --pipeline-format "%{org}.%{repo}.%{branch}.test"
+```
+
+**Note on PR Creation:** The feature to automatically create Pull Requests to fix pipeline visibility is currently **only available for the GitHub Expeditor provider**. This functionality is not implemented for the Buildkite provider.
+
 ## Misc Promises
 
 The [promises.rb](src/promises.rb) script allows you to add, edit, resolve,
