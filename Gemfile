@@ -6,8 +6,8 @@ gem 'faraday-retry'
 gem 'gruff'
 gem 'mixlib-log'
 gem 'mixlib-config'
-gem 'graphql-client', '~> 0.26.0'
-gem 'graphql', '~> 1.13'
+gem 'graphql-client', '~> 0.26.0' # For Buildkite GraphQL API interaction
+gem 'graphql', '~> 1.13'         # Dependency for graphql-client
 
 group(:development) do
   # for cookstyle

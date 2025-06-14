@@ -13,37 +13,27 @@ require_relative 'lib/oss_stats/buildkite_client'
 require_relative 'lib/oss_stats/buildkite_token'
 
 def rate_limited_sleep
-  limit_gh_ops_per_minute = OssStats::CiStatsConfig.limit_gh_ops_per_minute
-  if limit_gh_ops_per_minute&.positive?
-    sleep_time = 60.0 / limit_gh_ops_per_minute
+  limit = OssStats::CiStatsConfig.limit_gh_ops_per_minute
+  if limit&.positive?
+    sleep_time = 60.0 / limit
     log.debug("Sleeping for #{sleep_time.round(2)}s to honor rate-limit")
     sleep(sleep_time)
   end
 end
 
 # Fetch PR and Issue stats from GitHub in a single API call
-def get_pr_and_issue_stats(client, options)
+def get_pr_and_issue_stats(client, options) # rubocop:disable Metrics/MethodLength, Metrics/AbcSize
   repo = "#{options[:org]}/#{options[:repo]}"
   cutoff_date = Date.today - options[:days]
   pr_stats = {
-    open: 0,
-    closed: 0,
-    total_close_time: 0.0,
-    oldest_open: nil,
-    oldest_open_days: 0,
-    oldest_open_last_activity: 0,
-    stale_count: 0,
-    opened_this_period: 0,
+    open: 0, closed: 0, total_close_time: 0.0, oldest_open: nil,
+    oldest_open_days: 0, oldest_open_last_activity: 0, stale_count: 0,
+    opened_this_period: 0
   }
   issue_stats = {
-    open: 0,
-    closed: 0,
-    total_close_time: 0.0,
-    oldest_open: nil,
-    oldest_open_days: 0,
-    oldest_open_last_activity: 0,
-    stale_count: 0,
-    opened_this_period: 0,
+    open: 0, closed: 0, total_close_time: 0.0, oldest_open: nil,
+    oldest_open_days: 0, oldest_open_last_activity: 0, stale_count: 0,
+    opened_this_period: 0
   }
   prs = { open: [], closed: [] }
   issues = { open: [], closed: [] }
@@ -65,16 +55,15 @@ def get_pr_and_issue_stats(client, options)
       days_open = (Date.today - created_date).to_i
       days_since_last_activity = (Date.today - last_comment_date).to_i
 
-      log.debug(
-        "Checking item: #{is_pr ? 'PR' : 'Issue'}, " +
-        "Created at #{created_date}, Closed at #{closed_date || 'N/A'}",
-      )
+      log.debug("Checking item: #{is_pr ? 'PR' : 'Issue'}, Created at " \
+                "#{created_date}, Closed at #{closed_date || 'N/A'}")
 
       stats = is_pr ? pr_stats : issue_stats
       list = is_pr ? prs : issues
 
       # we count open as open and not waiting on contributor
-      if closed_date.nil? && !labels.include?('Status: Waiting on Contributor')
+      waiting_on_contrib = labels.include?('Status: Waiting on Contributor')
+      if closed_date.nil? && !waiting_on_contrib
         if stats[:oldest_open].nil? || created_date < stats[:oldest_open]
           stats[:oldest_open] = created_date
           stats[:oldest_open_days] = days_open
@@ -109,11 +98,7 @@ def get_pr_and_issue_stats(client, options)
     break if all_items_before_cutoff
   end
   pr_stats[:avg_time_to_close_hours] =
-    if pr_stats[:closed].zero?
-      0
-    else
-      pr_stats[:total_close_time] / pr_stats[:closed]
-    end
+    pr_stats[:closed].zero? ? 0 : pr_stats[:total_close_time] / pr_stats[:closed]
   issue_stats[:avg_time_to_close_hours] =
     if issue_stats[:closed].zero?
       0
@@ -121,8 +106,10 @@ def get_pr_and_issue_stats(client, options)
       issue_stats[:total_close_time] / issue_stats[:closed]
     end
   { pr: pr_stats, issue: issue_stats, pr_list: prs, issue_list: issues }
-end
+end # rubocop:enable Metrics/MethodLength, Metrics/AbcSize
 
+# rubocop:disable Metrics/MethodLength, Metrics/AbcSize
+# rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 def get_failed_tests_from_ci(client, settings)
   repo = "#{settings[:org]}/#{settings[:repo]}"
   cutoff_date = Date.today - settings[:days]
@@ -138,41 +125,51 @@ def get_failed_tests_from_ci(client, settings)
 
   # Buildkite integration
   begin
-    readme_content = client.readme(repo, accept: 'application/vnd.github.v3.raw')
+    readme_content = client.readme(
+      repo, accept: 'application/vnd.github.v3.raw'
+    )
     rate_limited_sleep
-    buildkite_badge_regex = %r{https://(?:badge|badges)\.buildkite\.com/([^/]+)/([^/]+)\.svg}
-    match = readme_content.match(buildkite_badge_regex)
+    # Regex for Buildkite badges
+    bk_badge_regex = %r{https://(?:badge|badges)\.buildkite\.com/([^/]+)/([^/]+)\.svg}
+    match = readme_content.match(bk_badge_regex)
 
     if match
       org_slug = match[1]
       pipeline_slug = match[2]
       log.info("Found Buildkite pipeline: #{org_slug}/#{pipeline_slug}")
 
-      # TODO: Retrieve Buildkite token (placeholder)
-      buildkite_token = OssStats::BuildkiteToken.token(org_slug) # Assuming a similar mechanism to GitHub token
+      # Assuming BuildkiteToken.token might take org_slug or similar
+      buildkite_token = OssStats::BuildkiteToken.token(org_slug)
 
       if buildkite_token
-        buildkite_client = OssStats::BuildkiteClient.new(buildkite_token)
+        # Initialize with org_slug for BuildkiteClient if it needs it
+        # The refactored client takes (token, org_slug)
+        bk_client = OssStats::BuildkiteClient.new(buildkite_token, org_slug)
         processed_branches.each do |branch_name|
-          log.debug("Fetching Buildkite builds for pipeline #{pipeline_slug}, branch: #{branch_name}, since: #{cutoff_date}")
-          builds = buildkite_client.get_pipeline_builds(pipeline_slug, branch_name, cutoff_date) # Method to be implemented
-          # Process Buildkite builds (adapt existing logic)
+          log.debug("Fetching Buildkite builds for pipeline " \
+                    "#{pipeline_slug}, branch: #{branch_name}, " \
+                    "since: #{cutoff_date}")
+          # get_pipeline_builds expects (short_pipeline_slug, branch, date)
+          builds = bk_client.get_pipeline_builds(
+            pipeline_slug, branch_name, cutoff_date
+          )
           builds.each do |build|
-            build_state = build['state'] # Example, adjust based on actual API response
-            job_name = build['jobs'].first['name'] # Example, adjust based on actual API response
-            created_at = Date.parse(build['created_at']) # Example, adjust based on actual API response
+            # Assuming build is a hash like { name: "...", date: "YYYY-MM-DD" }
+            # and represents a failed job as per BuildkiteClient's transformation
+            job_name = build[:name]
+            created_at = Date.parse(build[:date]) # Date of failure
 
-            next if created_at < cutoff_date
+            # No need to check created_at < cutoff_date,
+            # as get_pipeline_builds should handle the `since_date` filter.
 
-            buildkite_job_key = "[Buildkite] #{pipeline_slug} / #{job_name}"
-            if build_state == 'failed'
-              failed_tests[branch_name][buildkite_job_key] ||= Set.new
-              failed_tests[branch_name][buildkite_job_key] << created_at
-            end
+            bk_job_key = "[Buildkite] #{org_slug}/#{pipeline_slug} / #{job_name}"
+            # The structure from get_pipeline_builds is already failed jobs
+            (failed_tests[branch_name][bk_job_key] ||= Set.new) << created_at
           end
         end
       else
-        log.warn("Buildkite token not found for organization #{org_slug}. Skipping Buildkite stats.")
+        log.warn("Buildkite token not found for organization #{org_slug}. " \
+                 "Skipping Buildkite stats.")
       end
     else
       log.info("No Buildkite badge found in README for #{repo}")
@@ -184,8 +181,9 @@ def get_failed_tests_from_ci(client, settings)
     log.debug(e.backtrace.join("\n"))
   end
 
-  processed_branches.each do |branch|
-    log.debug("Checking GitHub Actions workflow runs for #{repo}, branch: #{branch}")
+  processed_branches.each do |branch| # GitHub Actions processing
+    log.debug("Checking GitHub Actions workflow runs for #{repo}, " \
+              "branch: #{branch}")
     begin
       workflows = client.workflows(repo).workflows
       rate_limited_sleep
@@ -193,49 +191,44 @@ def get_failed_tests_from_ci(client, settings)
         log.debug("Workflow: #{workflow.name}")
         workflow_runs = []
         page = 1
-        loop do
+        loop do # Paginate through workflow runs
           log.debug("  Acquiring page #{page}")
-          runs = client.workflow_runs(
-            repo, workflow.id, branch:, status: 'completed', per_page: 100,
-            page:
+          runs_page = client.workflow_runs(
+            repo, workflow.id, branch:, status: 'completed',
+            per_page: 100, page:
           )
           rate_limited_sleep
-
-          break if runs.workflow_runs.empty?
-
-          workflow_runs.concat(runs.workflow_runs)
-
+          break if runs_page.workflow_runs.empty?
+          workflow_runs.concat(runs_page.workflow_runs)
           break if workflow_runs.last.created_at.to_date < cutoff_date
-
           page += 1
         end
 
         workflow_runs.sort_by!(&:created_at).reverse!
         last_failure_date = {}
-        workflow_runs.each do |run|
+        workflow_runs.each do |run| # Process each run
           log.debug("  Looking at workflow run #{run.id}")
           run_date = run.created_at.to_date
           next if run_date < cutoff_date
 
           jobs = client.workflow_run_jobs(repo, run.id, per_page: 100).jobs
           rate_limited_sleep
-
-          jobs.each do |job|
+          jobs.each do |job| # Process each job in the run
             log.debug("    Looking at job #{job.name} [#{job.conclusion}]")
-            job_name_key = "[GitHub Actions] #{workflow.name} / #{job.name}" # Added prefix
+            job_key = "[GitHub Actions] #{workflow.name} / #{job.name}"
             if job.conclusion == 'failure'
-              failed_tests[branch][job_name_key] ||= Set.new
-              failed_tests[branch][job_name_key] << run_date
-              last_failure_date[job_name_key] = run_date
+              (failed_tests[branch][job_key] ||= Set.new) << run_date
+              last_failure_date[job_key] = run_date
             elsif job.conclusion == 'success'
-              # Ensure last_failure_date entry exists before trying to access it
-              if last_failure_date.key?(job_name_key) && last_failure_date[job_name_key] &&
-                 last_failure_date[job_name_key] <= run_date
-                last_failure_date.delete(job_name_key)
+              if last_failure_date.key?(job_key) &&
+                 last_failure_date[job_key] &&
+                 last_failure_date[job_key] <= run_date
+                last_failure_date.delete(job_key)
               end
             end
           end
         end
+        # Mark days from last failure to today as failed
         last_failure_date.each do |job_key, last_fail_date|
           (last_fail_date + 1..today).each do |date|
             (failed_tests[branch][job_key] ||= Set.new) << date
@@ -243,22 +236,20 @@ def get_failed_tests_from_ci(client, settings)
         end
       end
     rescue Octokit::NotFound => e
-      log.warn(
-        "Workflow API returned 404 for #{repo} branch " +
-        "#{branch}: #{e.message}.",
-      )
+      log.warn("Workflow API returned 404 for #{repo} branch #{branch}: " \
+               "#{e.message}.")
     rescue Octokit::Error, StandardError => e
-      log.error(
-        "Error processing branch #{branch} for repo " +
-        "#{repo}: #{e.message}",
-      )
+      log.error("Error processing branch #{branch} for repo #{repo}: " \
+                "#{e.message}")
       log.debug(e.backtrace.join("\n"))
     end
   end
   failed_tests
 end
+# rubocop:enable Metrics/MethodLength, Metrics/AbcSize
+# rubocop:enable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 
-def print_pr_or_issue_stats(data, type, include_list)
+def print_pr_or_issue_stats(data, type, include_list) # rubocop:disable Metrics/AbcSize
   stats = data[type.downcase.to_sym]
   list = data["#{type.downcase}_list".to_sym]
   type_plural = type + 's'
@@ -266,44 +257,39 @@ def print_pr_or_issue_stats(data, type, include_list)
   log.info("    * Closed #{type_plural}: #{stats[:closed]}")
   if include_list
     list[:closed].each do |item|
-      log.info(
-        "        * [#{item.title} (##{item.number})](#{item.html_url}) " +
-        "- @#{item.user.login}",
-      )
+      log.info("        * [#{item.title} (##{item.number})]" \
+               "(#{item.html_url}) - @#{item.user.login}")
     end
   end
-  log.info(
-    "    * Open #{type_plural}: #{stats[:open]} " +
-    "(#{include_list ? 'listing ' : ''}#{stats[:opened_this_period]} " +
-    'opened this period)',
-  )
-  if include_list && stats[:opened_this_period] > 0
+  opened_this_period_msg = if include_list
+                             "listing #{stats[:opened_this_period]}"
+                           else
+                             stats[:opened_this_period].to_s
+                           end
+  log.info("    * Open #{type_plural}: #{stats[:open]} " \
+           "(#{opened_this_period_msg} opened this period)")
+
+  if include_list && stats[:opened_this_period].positive?
     list[:open].each do |item|
-      log.info(
-        "        * [#{item.title} (##{item.number})](#{item.html_url}) " +
-        "- @#{item.user.login}",
-      )
+      log.info("        * [#{item.title} (##{item.number})]" \
+               "(#{item.html_url}) - @#{item.user.login}")
     end
   end
   if stats[:oldest_open]
-    log.info(
-      "    * Oldest Open #{type}: #{stats[:oldest_open]} " +
-      "(#{stats[:oldest_open_days]} days open, last activity " +
-      "#{stats[:oldest_open_last_activity]} days ago)",
-    )
+    log.info("    * Oldest Open #{type}: #{stats[:oldest_open]} " \
+             "(#{stats[:oldest_open_days]} days open, last activity " \
+             "#{stats[:oldest_open_last_activity]} days ago)")
   end
-  log.info(
-    "    * Stale #{type} (>30 days without comment): #{stats[:stale_count]}",
-  )
+  log.info("    * Stale #{type} (>30 days without comment): " \
+           "#{stats[:stale_count]}")
   avg_time = stats[:avg_time_to_close_hours]
-  avg_time_str =
-    if avg_time > 24
-      "#{(avg_time / 24).round(2)} days"
-    else
-      "#{avg_time.round(2)} hours"
-    end
+  avg_time_str = if avg_time > 24
+                   "#{(avg_time / 24).round(2)} days"
+                 else
+                   "#{avg_time.round(2)} hours"
+                 end
   log.info("    * Avg Time to Close #{type_plural}: #{avg_time_str}")
-end
+end # rubocop:enable Metrics/AbcSize
 
 def print_ci_status(test_failures, _options)
   log.info("\n* CI Stats:")
@@ -322,120 +308,79 @@ end
 
 def parse_options # rubocop:disable Metrics/MethodLength, Metrics/AbcSize
   options = {}
-  valid_modes = %w{ci pr issue all}
-  OptionParser.new do |opts|
+  valid_modes = %w[ci pr issue all]
+  OptionParser.new do |opts| # rubocop:disable Metrics/BlockLength
     opts.banner = "Usage: #{File.basename($PROGRAM_NAME)} [options]"
 
-    opts.on(
-      '--branches BRANCHES',
-      Array,
-      'Comma-separated list of branches',
-    ) do |v|
+    opts.on('--branches BRANCHES', Array, 'Comma-separated list of branches') do |v|
       options[:default_branches] = v
     end
 
     opts.on(
-      '-c FILE',
-      '--config FILE_PATH',
-      String,
-      'Config file to load. [default: will look for `ci_stats_config.rb` ' +
-      'in `./`, `~/.config/oss_stats`, and `/etc`]',
-    ) do |c|
-      options[:config] = c
-    end
+      '-c FILE', '--config FILE_PATH', String,
+      'Config file to load. [default: will look for `ci_stats_config.rb` ' \
+      'in `./`, `~/.config/oss_stats`, and `/etc`]'
+    ) { |c| options[:config] = c }
 
-    opts.on(
-      '-d DAYS',
-      '--days DAYS',
-      Integer,
-      'Number of days to analyze',
-    ) do |v|
+    opts.on('-d DAYS', '--days DAYS', Integer, 'Number of days to analyze') do |v|
       options[:default_days] = v
     end
 
-    opts.on(
-      '--ci-timeout TIMEOUT',
-      Integer,
-      'Timeout for CI processing in seconds',
-    ) do |v|
+    opts.on('--ci-timeout TIMEOUT', Integer,
+            'Timeout for CI processing in seconds') do |v|
       options[:ci_timeout] = v
     end
 
-    opts.on(
-      '--github-token TOKEN',
-      'GitHub personal access token',
-    ) do |v|
+    opts.on('--github-token TOKEN', 'GitHub personal access token') do |v|
       options[:github_token] = v
     end
 
-    opts.on(
-      '--github-api-endpoint ENDPOINT',
-      String,
-      'GitHub API endpoint',
-    ) do |v|
+    opts.on('--github-api-endpoint ENDPOINT', String, 'GitHub API endpoint') do |v|
       options[:github_api_endpoint] = v
     end
 
-    opts.on(
-      '--include-list',
-      'Include list of relevant PRs/Issues (default: false)',
-    ) do
+    opts.on('--include-list',
+            'Include list of relevant PRs/Issues (default: false)') do
       options[:include_list] = true
     end
 
-    opts.on(
-      '--limit-gh-ops-per-minute RATE',
-      Float,
-      'Rate limit GitHub API operations to this number per minute',
-    ) do |v|
+    opts.on('--limit-gh-ops-per-minute RATE', Float,
+            'Rate limit GitHub API operations to this number per minute') do |v|
       options[:limit_gh_ops_per_minute] = v
     end
 
-    opts.on(
-      '-l LEVEL',
-      '--log-level LEVEL',
-      %i{debug info warn error fatal},
-      'Set logging level to LEVEL. [default: info]',
-    ) do |level|
+    opts.on('-l LEVEL', '--log-level LEVEL', %i[debug info warn error fatal],
+            'Set logging level to LEVEL. [default: info]') do |level|
       options[:log_level] = level
     end
 
     opts.on(
-      '--mode MODE',
-      Array,
-      'Comma-separated list of modes: ci,issue,pr, or all (default: all)',
+      '--mode MODE', Array,
+      'Comma-separated list of modes: ci,issue,pr, or all (default: all)'
     ) do |v|
       invalid_modes = v.map(&:downcase) - valid_modes
       unless invalid_modes.empty?
         raise OptionParser::InvalidArgument,
-          "Invalid mode(s): #{invalid_modes.join(', ')}." +
-          "Valid modes are: #{valid_modes.join(', ')}"
+              "Invalid mode(s): #{invalid_modes.join(', ')}. " \
+              "Valid modes are: #{valid_modes.join(', ')}"
       end
       options[:mode] = v.map(&:downcase)
     end
 
-    opts.on(
-      '--org ORG_NAME',
-      String,
-      'GitHub organization name',
-    ) do |v|
+    opts.on('--org ORG_NAME', String, 'GitHub organization name') do |v|
       options[:org] = v
     end
 
-    opts.on(
-      '--repo REPO_NAME',
-      String,
-      'GitHub repository name',
-    ) do |v|
+    opts.on('--repo REPO_NAME', String, 'GitHub repository name') do |v|
       options[:repo] = v
     end
   end.parse!
   log.level = options[:log_level] if options[:log_level]
 
   # Determine config file and load
-  config_to_load = options[:config] || OssStats::CiStatsConfig.config_file
-  if config_to_load && File.exist?(config_to_load)
-    expanded_config = File.expand_path(config_to_load)
+  config_path = options[:config] || OssStats::CiStatsConfig.config_file
+  if config_path && File.exist?(config_path)
+    expanded_config = File.expand_path(config_path)
     log.info("Loaded configuration from: #{expanded_config}")
     OssStats::CiStatsConfig.from_file(expanded_config)
   end
@@ -444,27 +389,21 @@ def parse_options # rubocop:disable Metrics/MethodLength, Metrics/AbcSize
 
   if options[:org] && options[:repo]
     log.debug('Overwriting any config organizations with CLI opts')
-    repo_config =
-      OssStats::CiStatsConfig.organizations.fetch(
-        options[:org], {}
-      ).fetch('repositories', {}).fetch(options[:repo], {})
+    repo_conf = OssStats::CiStatsConfig.organizations
+                                     .fetch(options[:org], {})
+                                     .fetch('repositories', {})
+                                     .fetch(options[:repo], {})
     OssStats::CiStatsConfig.organizations = {
-      options[:org] => {
-        'repositories' => {
-          options[:repo] => repo_config,
-        },
-      },
+      options[:org] => { 'repositories' => { options[:repo] => repo_conf } }
     }
   elsif options[:org] || options[:repo]
-    log.fatal(
-      'Error: Both --org and --repo must be specified if either is used. ' +
-      'Exiting.',
-    )
+    log.fatal('Error: Both --org and --repo must be specified if either ' \
+              'is used. Exiting.')
     exit 1
   end
-end
+end # rubocop:enable Metrics/MethodLength, Metrics/AbcSize
 
-def main
+def main # rubocop:disable Metrics/MethodLength, Metrics/AbcSize
   parse_options
 
   token = get_github_token!(OssStats::CiStatsConfig)
@@ -472,30 +411,29 @@ def main
   # Initialize Octokit::Client using the token now stored in config
   client = Octokit::Client.new(
     access_token: token,
-    api_endpoint: OssStats::CiStatsConfig.github_api_endpoint,
+    api_endpoint: OssStats::CiStatsConfig.github_api_endpoint
   )
 
-  get_effective_settings =
-    lambda do |org, repo, org_file_conf = {}, repo_file_conf = {}|
-      settings = { org:, repo: }
-      settings[:days] = repo_file_conf['days'] ||
-                        org_file_conf['default_days'] ||
-                        OssStats::CiStatsConfig.default_days
-      settings[:branches] = repo_file_conf['branches'] ||
-                            org_file_conf['default_branches'] ||
-                            OssStats::CiStatsConfig.default_branches
-      settings[:branches] = Array(
-        if settings[:branches].is_a?(String)
-          settings[:branches].split(',').map(&:strip)
-        else
-          settings[:branches]
-        end,
-      )
-      settings
-    end
+  get_effective_settings = lambda do |org, repo, org_conf = {}, repo_conf = {}|
+    settings = { org:, repo: }
+    settings[:days] = repo_conf['days'] ||
+                      org_conf['default_days'] ||
+                      OssStats::CiStatsConfig.default_days
+    settings[:branches] = repo_conf['branches'] ||
+                          org_conf['default_branches'] ||
+                          OssStats::CiStatsConfig.default_branches
+    settings[:branches] = Array(
+      if settings[:branches].is_a?(String)
+        settings[:branches].split(',').map(&:strip)
+      else
+        settings[:branches]
+      end,
+    )
+    settings
+  end
 
   mode = OssStats::CiStatsConfig.mode
-  mode = %w{ci pr issue} if mode.include?('all')
+  mode = %w[ci pr issue] if mode.include?('all')
   repos_to_process = []
 
   if OssStats::CiStatsConfig.organizations.nil? ||
@@ -522,13 +460,12 @@ def main
 
   repos_to_process.each do |settings|
     url = "https://github.com/#{settings[:org]}/#{settings[:repo]}"
-    log.info(
-      "\n*_[#{settings[:org]}/#{settings[:repo]}](#{url}) Stats " +
-      "(Last #{settings[:days]} days)_*",
-    )
-    if %w{all pr issue}.any? { |m| mode.include?(m) }
+    log.info("\n*_[#{settings[:org]}/#{settings[:repo]}](#{url}) Stats " \
+             "(Last #{settings[:days]} days)_*")
+
+    if %w[all pr issue].any? { |m| mode.include?(m) }
       stats = get_pr_and_issue_stats(client, settings)
-      %w{PR Issue}.each do |type|
+      %w[PR Issue].each do |type|
         next unless mode.include?(type.downcase)
         print_pr_or_issue_stats(
           stats, type, OssStats::CiStatsConfig.include_list
@@ -540,6 +477,6 @@ def main
     test_failures = get_failed_tests_from_ci(client, settings)
     print_ci_status(test_failures || {}, {})
   end
-end
+end # rubocop:enable Metrics/MethodLength, Metrics/AbcSize
 
 main if __FILE__ == $PROGRAM_NAME
