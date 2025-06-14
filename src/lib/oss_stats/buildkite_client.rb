@@ -3,8 +3,14 @@ require 'json'
 require 'uri'
 
 module OssStats
+  # Client for interacting with the Buildkite GraphQL API.
   class BuildkiteClient
     attr_reader :token, :organization_slug
+
+    # Initializes a new BuildkiteClient.
+    #
+    # @param token [String] The Buildkite API token.
+    # @param organization_slug [String] The slug of the Buildkite organization.
 
     def initialize(token, organization_slug)
       @token = token
@@ -105,6 +111,81 @@ module OssStats
       end
 
       pipelines_by_repo
+    end
+
+    # Fetches builds for a given pipeline within a specified date range.
+    # Handles pagination to retrieve all relevant builds.
+    #
+    # @param pipeline_slug [String] The slug of the pipeline (without the organization part).
+    # @param pull_request_id [String, nil] The ID of the pull request (currently not used in the query).
+    # @param from_date [Date] The start date for fetching builds.
+    # @param to_date [Date] The end date for fetching builds.
+    # @return [Array<Hash>] An array of build edges from the GraphQL response.
+    #   Each edge contains a 'node' with build details including 'state', 'createdAt', and 'jobs'.
+    #   Returns an empty array if an error occurs or no builds are found.
+    def get_pipeline_builds(pipeline_slug, pull_request_id, from_date, to_date)
+      all_build_edges = []
+      after_cursor = nil
+      has_next_page = true
+
+      while has_next_page
+        # TODO: Parse the GraphQL response more thoroughly
+        # TODO: Add pull_request_id filter if/when available in schema
+        query = <<~GRAPHQL
+          query {
+            pipeline(slug: "#{@organization_slug}/#{pipeline_slug}") {
+              builds(
+                first: 50, # Adjust page size as needed
+                after: #{after_cursor ? "\"#{after_cursor}\"" : 'null'},
+                createdAtFrom: "#{from_date.to_datetime.rfc3339}",
+                createdAtTo: "#{to_date.to_datetime.rfc3339}"
+              ) {
+                edges {
+                  node {
+                    state
+                    createdAt # Added this field
+                    jobs(first: 50) { # Assuming 50 jobs per build is enough
+                      edges {
+                        node {
+                          ... on JobTypeCommand {
+                            label
+                            state
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+                pageInfo {
+                  hasNextPage
+                  endCursor
+                }
+              }
+            }
+          }
+        GRAPHQL
+
+        response_data = execute_graphql_query(query)
+        builds_data = response_data.dig('data', 'pipeline', 'builds')
+
+        if builds_data && builds_data['edges']
+          all_build_edges.concat(builds_data['edges'])
+          page_info = builds_data['pageInfo']
+          has_next_page = page_info['hasNextPage']
+          after_cursor = page_info['endCursor']
+        else
+          # No builds data or error in structure, stop pagination
+          has_next_page = false
+        end
+      end
+
+      all_build_edges
+    rescue StandardError => e
+      log.error(
+        "Error in get_pipeline_builds for slug " +
+        "#{@organization_slug}/#{pipeline_slug}: #{e.message}",
+      )
+      [] # Return empty array on error
     end
 
     private

@@ -84,6 +84,47 @@ organizations and repositories to run on by default. See
 As you can see the output is in markdown format suitable for posting in Slack,
 or storing in Github.
 
+### Buildkite CI Integration
+
+In addition to GitHub Actions, `ci_stats.rb` can also fetch and report on failed
+builds from Buildkite.
+
+**Detection:**
+The script automatically detects Buildkite pipelines by looking for Buildkite
+badges in the `README.md` file of each repository being processed. It uses a
+regular expression to find markdown links containing Buildkite badge images,
+for example:
+`[![Build Status](https://badge.buildkite.com/some_uuid.svg)](https://buildkite.com/your-org/your-pipeline-slug)`
+
+The Buildkite organization slug (`your-org`) and pipeline slug (`your-pipeline-slug`)
+are extracted from the target URL of this markdown link.
+
+**Configuration:**
+To enable Buildkite integration, you need to provide a Buildkite API token with
+`read_builds` and `read_pipelines` GraphQL permissions. The token can be configured in
+one of the following ways (listed in order of precedence):
+
+1.  **Command-line option:** Use the `--buildkite-token <TOKEN>` argument when
+    running `ci_stats.rb`.
+    ```shell
+    ./src/ci_stats.rb --buildkite-token YOUR_BUILDKITE_TOKEN
+    ```
+2.  **Environment Variable:** Set the `BUILDKITE_API_TOKEN` environment variable.
+    ```shell
+    export BUILDKITE_API_TOKEN="YOUR_BUILDKITE_TOKEN"
+    ./src/ci_stats.rb
+    ```
+3.  **Configuration File:** Add the token to your `ci_stats_config.rb` file:
+    ```ruby
+    # In your ci_stats_config.rb
+    buildkite_token 'YOUR_BUILDKITE_TOKEN'
+    ```
+
+If a Buildkite badge is found but no token is configured, a warning will be
+logged, and Buildkite processing for that repository will be skipped.
+The reported failures from Buildkite will be prefixed with "Buildkite /" in the
+output.
+
 There are a lot of options you can use to customize what is included in the
 report.
 
@@ -151,11 +192,20 @@ $ promises.rb
 You likely will probably want a config file for this as well and a sample
 is provided in [examples/promises_config.rb](examples/promises_config.rb).
 
-## Your GitHub Token
+## API Tokens
+
+### GitHub Token
 
 Everything in this repo looks for your GitHub Access Token in the following
 places, in order:
 
-1. The `--github-token` command-line argument
-1. The `$GITHUB_TOKEN` environment variable
-1. It'll also parse it from `~/.config/gh/hosts.yml` if you use `gh`.
+1. The `--github-token` command-line argument.
+2. The `GITHUB_TOKEN` environment variable.
+3. It'll also parse it from `~/.config/gh/hosts.yml` if you use the `gh` CLI tool.
+
+### Buildkite Token
+
+As described in the "Buildkite CI Integration" section, the Buildkite API token
+is required for fetching Buildkite stats and can be provided via the
+`--buildkite-token` CLI option, the `BUILDKITE_API_TOKEN` environment variable,
+or the `buildkite_token` setting in `ci_stats_config.rb`.
