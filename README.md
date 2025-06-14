@@ -106,14 +106,34 @@ and to update the report run `./src/meeting_stats.rb --mode generate`.
 
 ## Pipeline visibility stats
 
-:warning: This is a Work In Progress! :warning:
+Walks a GH Repo and determines if there are tests that end users likely
+cannot see.
 
-Currently [pipeline_visibility_stats.rb](src/pipeline_visibility_stats.rb) only
-supports Expeditor, which is Chef-specific and not open source. However, much
-of the code is generic and this could be adapted to other things.
+There are two providers: buildkite and expeditor. Expeditor is deprecated
+and will go away.
 
-The idea here is to walk public repos and find tests that are not visible to
-the public and report on them.
+### Buildkite Provider
+
+This attempts to find improperly configured pipelines in two ways:
+
+* Given the buildkite repo, gets a list of all pipelines and builds a
+  map of GitHub Repos to pipelines. Then, it walks all GH repos
+  repos (either in the GH Org, or specified in the config), and checks
+  to see if there are buildkite repos associated with it, and if there are,
+  checks their visibility settings
+* Walks the most recent 10 PRs, and checks for any status checks that are
+  on buildkite, and checks if it can see them, and if so, checks their
+  visibility (it reporst them as private if it cannot see them)
+
+This is likely to include pipelines expected to be public such as those
+added adhoc to specific PRs to do builds. You can use --skip to add skip
+patterns (partial-match text) to avoid counting those.
+
+### Expeditor Provider
+
+The Expeditor Provider parses expeditor configs, which is Chef-specific and not
+open source. However, much of the code is generic and this could be adapted to
+other things.
 
 ## Misc Promises
 
