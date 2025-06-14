@@ -11,6 +11,7 @@ module OssStats
     ci_timeout 600
     github_api_endpoint nil
     github_token nil
+    buildkite_token nil
     limit_gh_ops_per_minute nil
     include_list false
     organizations {}

@@ -87,6 +87,9 @@ or storing in Github.
 There are a lot of options you can use to customize what is included in the
 report.
 
+In addition to GitHub Actions, `ci_stats.rb` can also fetch and report on failed
+builds from Buildkite.
+
 ## Meeting Stats
 
 Many open source projects have weekly meetings and it's important to know
@@ -151,11 +154,23 @@ $ promises.rb
 You likely will probably want a config file for this as well and a sample
 is provided in [examples/promises_config.rb](examples/promises_config.rb).
 
-## Your GitHub Token
+## API Tokens
+
+### GitHub Token
 
 Everything in this repo looks for your GitHub Access Token in the following
 places, in order:
 
 1. The `--github-token` command-line argument
-1. The `$GITHUB_TOKEN` environment variable
-1. It'll also parse it from `~/.config/gh/hosts.yml` if you use `gh`.
+1. The `github_token` config file entry
+1. The `GITHUB_TOKEN` environment variable.
+1. It'll also parse it from `~/.config/gh/hosts.yml` if you use the `gh` CLI tool.
+
+### Buildkite Token
+
+Everything in this repo looks for your BuildKite API token in the following
+places, in order:
+
+1. The `--buildkite-token` command-line argument
+1. The `buildkite-token` config file entry
+1. The `BUILDKITE_API_TOKEN` environment variable.
