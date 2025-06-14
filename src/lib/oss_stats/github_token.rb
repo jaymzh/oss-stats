@@ -15,8 +15,9 @@ end
 def get_github_token!(options)
   token = get_github_token(options)
   unless token
-    raise 'GitHub token is missing. Please provide a token using ' +
-          '--github-token, or set $GITHUB_TOKEN, or run `gh auth login`'
+    raise ArgumentError,
+      'GitHub token is missing. Please provide a token using ' +
+      '--github-token, or set $GITHUB_TOKEN, or run `gh auth login`'
   end
   token
 end

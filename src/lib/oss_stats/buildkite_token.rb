@@ -1,13 +1,15 @@
 def get_buildkite_token(options)
-  options[:buildkite_token] || ENV['BUILDKITE_TOKEN'] || nil
+  return options[:buildkite_token] if options[:buildkite_tokne]
+  return ENV['BUILDKITE_API_TOKEN'] if ENV['BUILDKITE_API_TOKEN']
+  nil
 end
 
-def get_buildkite_token!(options)
-  token = get_buildkite_token(options)
+def get_buildkite_token!(config = OssStats::CiStatsConfig)
+  token = get_buildkite_token(config)
   unless token
     raise ArgumentError,
-      'Buildkite token not found. Pass with --buildkite-token or set ' +
-      'BUILDKITE_TOKEN env var.'
+      'Buildkite token not found. Set via --buildkite-token CLI option, ' +
+      'in ci_stats_config.rb, or as BUILDKITE_API_TOKEN environment variable.'
   end
   token
 end
