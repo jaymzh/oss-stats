@@ -1,166 +1,287 @@
-require 'net/http'
-require 'json'
-require 'uri'
+require 'graphql/client'
+require 'graphql/client/http'
+require 'date' # Ensure Date is available for parsing
 
 module OssStats
+  # BuildkiteClient interacts with the Buildkite GraphQL API.
+  # It requires the `graphql-client` gem.
   class BuildkiteClient
     attr_reader :token, :organization_slug
 
-    def initialize(token, organization_slug)
-      @token = token
-      @organization_slug = organization_slug
-      @graphql_endpoint = URI('https://graphql.buildkite.com/v1')
+    # Configure the HTTP adapter for the GraphQL client.
+    # This adapter will be used for all GraphQL requests.
+    HTTPAdapter = GraphQL::Client::HTTP.new('https://graphql.buildkite.com/v1') do
+      def headers(context)
+        # Inject the Bearer token and a User-Agent into each request.
+        # The `context` argument is not used here but is part of the method signature.
+        {
+          'Authorization' => "Bearer #{context[:token]}",
+          'User-Agent' => 'OssStats BuildkiteClient/1.0'
+        }
+      end
     end
 
-    def get_pipeline(pipeline_slug)
-      log.debug("Fetching pipeline: #{@organization_slug}/#{pipeline_slug}")
-      query = <<~GRAPHQL
-        query {
-          pipeline(slug: "#{@organization_slug}/#{pipeline_slug}") {
-            visibility
+    # Attempt to load the schema.
+    # In a production environment, this schema might be fetched and cached,
+    # or a pre-dumped schema.json could be used.
+    # For now, we try to load it dynamically. If this fails in restricted
+    # environments, a schema.json file would be the fallback.
+    begin
+      Schema = GraphQL::Client.load_schema(HTTPAdapter)
+    rescue SocketError, Net::OpenTimeout, Errno::ENETUNREACH => e
+      # Fallback or error message if schema loading fails
+      # This is a critical error for the client's operation.
+      # For this refactoring, we'll log and re-raise, assuming schema must be loadable.
+      # A more robust solution might involve loading from a local file if HTTP fails.
+      log.fatal "Failed to load Buildkite GraphQL schema: #{e.message}. " \
+                "Ensure network connectivity or provide a local schema.json."
+      # Re-raise or handle as appropriate for the application's startup sequence.
+      # For now, let it potentially stop the application if schema can't be loaded.
+      raise "Buildkite GraphQL schema could not be loaded: #{e.message}"
+    end
+
+    # The main GraphQL client instance.
+    Client = GraphQL::Client.new(schema: Schema, execute: HTTPAdapter)
+
+    # Define GraphQL queries as constants using the client.parse method.
+
+    GetPipelineQuery = Client.parse <<-'GRAPHQL'
+      query($slug: ID!) {
+        pipeline(slug: $slug) {
+          visibility
+        }
+      }
+    GRAPHQL
+
+    AllPipelinesQuery = Client.parse <<-'GRAPHQL'
+      query($orgSlug: ID!, $first: Int!, $after: String) {
+        organization(slug: $orgSlug) {
+          pipelines(first: $first, after: $after) {
+            edges {
+              node {
+                slug
+                repository {
+                  url
+                }
+                visibility
+              }
+            }
+            pageInfo {
+              endCursor
+              hasNextPage
+            }
           }
         }
-      GRAPHQL
+      }
+    GRAPHQL
 
-      response_data = execute_graphql_query(query)
-      pipeline_data = response_data.dig('data', 'pipeline')
-      if pipeline_data.nil? && response_data['data'].key?('pipeline')
-        # The query returned, and the 'pipeline' key exists but is null,
-        # meaning the pipeline was not found by Buildkite.
-        log.debug(
-          "Pipeline #{@organization_slug}/#{pipeline_slug} not found.",
-        )
-      elsif pipeline_data.nil? && response_data['errors']
-        # Errors occurred, already logged by execute_graphql_query,
-        # but we might want to note the slug it failed for.
-        log.warn(
-          "Failed to fetch pipeline #{@organization_slug}/#{pipeline_slug}" +
-          'due to API errors',
-        )
-      end
-      pipeline_data
-    rescue StandardError => e
-      log.error(
-        'Error in get_pipeline for slug ' +
-        "#{@organization_slug}/#{pipeline_slug}: #{e.message}",
-      )
-      nil
-    end
-
-    def all_pipelines
-      pipelines = []
-      after_cursor = nil
-      has_next_page = true
-
-      while has_next_page
-        query = <<~GRAPHQL
-          query {
-            organization(slug: "#{@organization_slug}") {
-              pipelines(
-                first: 50,
-                after: #{after_cursor ? "\"#{after_cursor}\"" : 'null'}
-              ) {
-                edges {
-                  node {
-                    slug
-                    repository {
-                      url
+    GetPipelineBuildsQuery = Client.parse <<-'GRAPHQL'
+      query($pipelineSlug: ID!, $branch: [String!], $createdFrom: DateTime, $first: Int!, $after: String) {
+        pipeline(slug: $pipelineSlug) {
+          builds(branch: $branch, createdAt: {from: $createdFrom}, first: $first, after: $after, order: BUILD_ORDER_DESC) {
+            pageInfo {
+              hasNextPage
+              endCursor
+            }
+            edges {
+              node {
+                number
+                state
+                createdAt
+                jobs(first: 100) { # Assuming a reasonable limit for jobs per build
+                  edges {
+                    node {
+                      ... on JobTypeCommand {
+                        label
+                        state
+                      }
+                      # Can add other job types here if needed, e.g., JobTypeTrigger
+                      # ... on JobTypeTrigger {
+                      #   label # Trigger jobs might not have a 'state' in the same way
+                      # }
                     }
-                    visibility
                   }
-                }
-                pageInfo {
-                  endCursor
-                  hasNextPage
                 }
               }
             }
           }
-        GRAPHQL
+        }
+      }
+    GRAPHQL
 
-        response_data = execute_graphql_query(query)
-        current_pipelines = response_data.dig(
-          'data', 'organization', 'pipelines', 'edges'
-        )
-        pipelines.concat(current_pipelines.map do |edge|
-                           edge['node']
-                         end) if current_pipelines
+    def initialize(token, organization_slug)
+      @token = token
+      @organization_slug = organization_slug
+      # @client is now class constant `Client`, initialized with schema and adapter.
+      # The HTTPAdapter uses `context[:token]` which we will pass in query calls.
+    end
 
-        page_info = response_data.dig(
-          'data', 'organization', 'pipelines', 'pageInfo'
-        )
-        has_next_page = page_info['hasNextPage']
-        after_cursor = page_info['endCursor']
+    def get_pipeline(pipeline_slug)
+      full_slug = "#{@organization_slug}/#{pipeline_slug}"
+      log.debug("Fetching pipeline: #{full_slug} using graphql-client")
+      variables = { slug: full_slug }
+      result = Client.query(GetPipelineQuery, variables:, context: { token: @token })
+
+      if result.errors.any?
+        log.error("GraphQL errors for pipeline #{full_slug}: #{result.errors.messages.values.join(', ')}")
+        return nil
+      end
+
+      # .data can be nil if there are top-level errors or the query itself returns nothing.
+      # Accessing .pipeline directly on a nil .data would raise NoMethodError.
+      return nil unless result.data
+
+      pipeline_data = result.data.pipeline
+      if pipeline_data.nil?
+        log.debug("Pipeline #{full_slug} not found or no data returned.")
+      end
+      pipeline_data&.to_h # Convert GraphQL::Client::Schema::ObjectType to Hash
+    rescue GraphQL::Client::Error => e # Catch client-specific errors
+      log.error("GraphQL client error in get_pipeline for #{full_slug}: #{e.message}")
+      log.debug(e.backtrace.join("\n"))
+      nil
+    rescue StandardError => e # Catch other unexpected errors
+      log.error("Unexpected error in get_pipeline for #{full_slug}: #{e.message}")
+      log.debug(e.backtrace.join("\n"))
+      nil
+    end
+
+    def all_pipelines # rubocop:disable Metrics/AbcSize
+      log.debug("Fetching all pipelines for org: #{@organization_slug} using graphql-client")
+      pipelines_acc = [] # Accumulator for pipeline nodes
+      after_cursor = nil
+      has_next_page = true
+
+      while has_next_page
+        variables = {
+          orgSlug: @organization_slug,
+          first: 50, # Number of items per page
+          after: after_cursor
+        }
+        result = Client.query(AllPipelinesQuery, variables:, context: { token: @token })
+
+        if result.errors.any?
+          log.error("GraphQL errors fetching all pipelines for #{@organization_slug}: #{result.errors.messages.values.join(', ')}")
+          break # Exit loop on error
+        end
+
+        unless result.data && result.data.organization && result.data.organization.pipelines
+          log.warn("No organization or pipelines data found for #{@organization_slug} in a page. Cursor: #{after_cursor}")
+          break
+        end
+
+        org_data = result.data.organization
+        current_pipelines_data = org_data.pipelines
+
+        current_pipelines_data.edges.each do |edge|
+          pipelines_acc << edge.node.to_h if edge.node # Add pipeline data as hash
+        end
+
+        page_info = current_pipelines_data.page_info
+        has_next_page = page_info.has_next_page
+        after_cursor = page_info.end_cursor
+        log.debug("Pagination: hasNextPage: #{has_next_page}, new_cursor: #{after_cursor}") if has_next_page
       end
 
       pipelines_by_repo = Hash.new { |h, k| h[k] = [] }
-      pipelines.each do |pipeline|
-        repo_url = pipeline.dig('repository', 'url').gsub('.git', '')
+      pipelines_acc.each do |pipeline|
+        # Ensure 'repository' and 'url' are present before trying to access them
+        repo_url = pipeline.dig('repository', 'url')&.gsub('.git', '')
         next unless repo_url
 
         pipelines_by_repo[repo_url] << {
           slug: pipeline['slug'],
-          visibility: pipeline['visibility'],
+          visibility: pipeline['visibility']
         }
       end
-
       pipelines_by_repo
+    rescue GraphQL::Client::Error => e
+      log.error("GraphQL client error in all_pipelines for #{@organization_slug}: #{e.message}")
+      log.debug(e.backtrace.join("\n"))
+      {} # Return empty hash on error
+    rescue StandardError => e
+      log.error("Unexpected error in all_pipelines for #{@organization_slug}: #{e.message}")
+      log.debug(e.backtrace.join("\n"))
+      {}
     end
 
-    private
+    def get_pipeline_builds(pipeline_slug, branch_name, since_date) # rubocop:disable Metrics/MethodLength, Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+      full_slug = "#{@organization_slug}/#{pipeline_slug}"
+      log.debug(
+        "Fetching builds for pipeline: #{full_slug}, branch: #{branch_name}, since: #{since_date} using graphql-client"
+      )
+      failed_builds_jobs = []
+      after_cursor = nil
+      has_next_page = true
+      # Ensure since_date is in ISO8601 format for the GraphQL query
+      iso_since_date = since_date.is_a?(String) ? since_date : since_date.to_datetime.rfc3339
 
-    def execute_graphql_query(query)
-      http = Net::HTTP.new(@graphql_endpoint.host, @graphql_endpoint.port)
-      http.use_ssl = true
-      request = Net::HTTP::Post.new(@graphql_endpoint.request_uri)
-      request['Authorization'] = "Bearer #{@token}"
-      request['Content-Type'] = 'application/json'
-      request.body = { query: }.to_json
+      while has_next_page
+        variables = {
+          pipelineSlug: full_slug,
+          branch: [branch_name].compact, # API expects an array of strings for branches
+          createdFrom: iso_since_date,
+          first: 50, # Page size
+          after: after_cursor
+        }
+        result = Client.query(GetPipelineBuildsQuery, variables:, context: { token: @token })
 
-      begin
-        response = http.request(request)
-
-        unless response.is_a?(Net::HTTPSuccess)
-          error_message = 'Buildkite API request failed with status ' \
-                          "#{response.code}: #{response.message}"
-          log.error(error_message)
-          raise error_message
+        if result.errors.any?
+          log.error("GraphQL errors for builds of #{full_slug}, branch #{branch_name}: #{result.errors.messages.values.join(', ')}")
+          break # Exit loop on error
         end
 
-        parsed_response = JSON.parse(response.body)
-
-        if parsed_response['errors']
-          # Log each error for better context if multiple errors are returned
-          error_details = parsed_response['errors'].map do |e|
-            msg = e['message']
-            path = e['path'] ? " (path: #{e['path'].join(' -> ')})" : ''
-            "#{msg}#{path}"
-          end.join('; ')
-          error_message = "Buildkite API returned errors: #{error_details}"
-          log.error(error_message)
-          # Also log the full error response for detailed debugging
-          log.debug(
-            "Full Buildkite error response: #{parsed_response['errors']}",
-          )
-          raise error_message
+        unless result.data && result.data.pipeline && result.data.pipeline.builds
+            log.warn("No pipeline or builds data found for #{full_slug}, branch #{branch_name}, since: #{iso_since_date} in a page. Cursor: #{after_cursor}. Errors: #{result.errors.messages}")
+            break
         end
-        parsed_response
-      rescue Net::HTTPExceptions => e
-        error_message =
-          "Network error connecting to Buildkite API: #{e.message}"
-        log.error(error_message)
-        raise error_message
-      rescue JSON::ParserError => e
-        error_message = "Error parsing JSON from Buildkite API: #{e.message}."
-        log.error(error_message)
-        log.debug("Problematic JSON response body: #{response&.body}")
-        raise error_message
-      rescue StandardError => e
-        error_message =
-          "Unexpected error during Buildkite API call: #{e.message}"
-        log.error(error_message)
-        raise error_message
+
+        builds_connection = result.data.pipeline.builds
+
+        builds_connection.edges.each do |build_edge|
+          build = build_edge.node
+          next unless build # Skip if build node is nil
+
+          build_created_at = Date.parse(build.created_at)
+
+          # Ensure jobs is not nil and has edges
+          next unless build.jobs && build.jobs.edges
+
+          build.jobs.edges.each do |job_edge|
+            job = job_edge.node
+            # Ensure job is not nil, has a state, and the state is FAILED
+            next unless job && job.respond_to?(:state) && job.state == 'FAILED'
+
+            failed_builds_jobs << {
+              name: job.respond_to?(:label) ? job.label : 'Unknown Job', # Use label if available
+              date: build_created_at.strftime('%Y-%m-%d')
+            }
+          end
+        end
+
+        page_info = builds_connection.page_info
+        has_next_page = page_info.has_next_page
+        after_cursor = page_info.end_cursor
+        log.debug("Builds Pagination: hasNextPage: #{has_next_page}, new_cursor: #{after_cursor}") if has_next_page
       end
+      log.debug("Found #{failed_builds_jobs.length} failed jobs for #{full_slug}, branch: #{branch_name}, since: #{iso_since_date}")
+      failed_builds_jobs
+    rescue GraphQL::Client::Error => e
+      log.error("GraphQL client error in get_pipeline_builds for #{full_slug}, branch #{branch_name}: #{e.message}")
+      log.debug(e.backtrace.join("\n"))
+      []
+    rescue StandardError => e
+      log.error("Unexpected error in get_pipeline_builds for #{full_slug}, branch #{branch_name}: #{e.message}")
+      log.debug(e.backtrace.join("\n"))
+      []
     end
+
+    # Old execute_graphql_query method is no longer needed and has been removed.
   end
+end
+
+# Helper method for logging, assuming a simple global logger for now.
+# This could be replaced with a more sophisticated logging setup (e.g., Mixlib::Log).
+def log
+  OssStats::Log.instance
 end

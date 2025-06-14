@@ -33,11 +33,20 @@ doing anything.
 
 ## CI Stats
 
-The [ci_stats.rb](src/ci_stats.rb) script will walk GitHub CI workflows for a
-given repo, and report the number of days each one was red on the `main` branch
-in the last N days (default: 30) as well as gather stats on Issues and PRs.
+The [ci_stats.rb](src/ci_stats.rb) script analyzes CI results and repository activity.
+It reports the number of days each GitHub Actions workflow was failing on specified
+branches within a given period (default: 30 days). Additionally, it gathers
+statistics on Issues and Pull Requests.
 
-The output looks like:
+**New: Buildkite Integration**
+
+`ci_stats.rb` can now also fetch and report CI failures from Buildkite.
+It discovers Buildkite pipelines by looking for Buildkite badges (e.g.,
+`https://badge.buildkite.com/<org_slug>/<pipeline_slug>.svg`) in the
+repository's `README.md` file. If a badge is found, it will attempt to
+retrieve build results for the corresponding pipeline.
+
+The output, including Buildkite failures, looks like:
 
 ```shell
 $ ./src/ci_stats.rb --days 7 --branches chef-18,main --org chef --repo chef
@@ -59,23 +68,20 @@ $ ./src/ci_stats.rb --days 7 --branches chef-18,main --org chef --repo chef
 
 * CI Failure Stats:
     * Branch: main
-        * docr_lnx_x86_64 (debian-11): 1 days
-        * docr_lnx_x86_64 (rockylinux-8): 1 days
-        * docr_lnx_x86_64 (ubuntu-2204): 1 days
-        * vm_lnx_x86_64 (almalinux-8): 1 days
-        * vm_lnx_x86_64 (almalinux-9): 1 days
-        * vm_lnx_x86_64 (amazonlinux-2): 1 days
-        * vm_lnx_x86_64 (amazonlinux-2023): 1 days
-        * vm_lnx_x86_64 (debian-11): 1 days
-        * vm_lnx_x86_64 (debian-12): 1 days
-        * vm_lnx_x86_64 (fedora-40): 2 days
-        * vm_lnx_x86_64 (opensuse-leap-15): 1 days
-        * vm_lnx_x86_64 (oracle-7): 1 days
-        * vm_lnx_x86_64 (oracle-8): 1 days
-        * vm_lnx_x86_64 (oracle-9): 1 days
-        * vm_lnx_x86_64 (rockylinux-8): 2 days
+        * [GitHub Actions] docr_lnx_x86_64 (debian-11): 1 days
+        * [GitHub Actions] docr_lnx_x86_64 (rockylinux-8): 1 days
+        * [GitHub Actions] docr_lnx_x86_64 (ubuntu-2204): 1 days
+        * [Buildkite] my-org/my-pipeline / Test Suite: 3 days
+        * [Buildkite] my-org/my-pipeline / Lint Checks: 2 days
     * Branch: chef18: No job failures found.
 ```
+
+**Token Requirements for Buildkite:**
+
+To fetch data from Buildkite, an API token is required. The script retrieves this
+token from the environment variable `BUILDKITE_TOKEN`. Ensure this variable is
+set with a valid Buildkite API token that has `read_builds` and `graphql`
+scopes for the relevant organization(s).
 
 You can instead make a configuration file for `ci_stats` with a list of
 organizations and repositories to run on by default. See
@@ -85,7 +91,8 @@ As you can see the output is in markdown format suitable for posting in Slack,
 or storing in Github.
 
 There are a lot of options you can use to customize what is included in the
-report.
+report. No new command-line options were added specifically for Buildkite, as
+pipeline discovery is automatic.
 
 ## Meeting Stats
 

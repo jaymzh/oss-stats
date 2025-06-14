@@ -9,6 +9,8 @@ require 'set'
 require_relative 'lib/oss_stats/log'
 require_relative 'lib/oss_stats/ci_stats_config'
 require_relative 'lib/oss_stats/github_token'
+require_relative 'lib/oss_stats/buildkite_client'
+require_relative 'lib/oss_stats/buildkite_token'
 
 def rate_limited_sleep
   limit_gh_ops_per_minute = OssStats::CiStatsConfig.limit_gh_ops_per_minute
@@ -134,8 +136,56 @@ def get_failed_tests_from_ci(client, settings)
                        end
   processed_branches.each { |b| failed_tests[b] = {} }
 
+  # Buildkite integration
+  begin
+    readme_content = client.readme(repo, accept: 'application/vnd.github.v3.raw')
+    rate_limited_sleep
+    buildkite_badge_regex = %r{https://(?:badge|badges)\.buildkite\.com/([^/]+)/([^/]+)\.svg}
+    match = readme_content.match(buildkite_badge_regex)
+
+    if match
+      org_slug = match[1]
+      pipeline_slug = match[2]
+      log.info("Found Buildkite pipeline: #{org_slug}/#{pipeline_slug}")
+
+      # TODO: Retrieve Buildkite token (placeholder)
+      buildkite_token = OssStats::BuildkiteToken.token(org_slug) # Assuming a similar mechanism to GitHub token
+
+      if buildkite_token
+        buildkite_client = OssStats::BuildkiteClient.new(buildkite_token)
+        processed_branches.each do |branch_name|
+          log.debug("Fetching Buildkite builds for pipeline #{pipeline_slug}, branch: #{branch_name}, since: #{cutoff_date}")
+          builds = buildkite_client.get_pipeline_builds(pipeline_slug, branch_name, cutoff_date) # Method to be implemented
+          # Process Buildkite builds (adapt existing logic)
+          builds.each do |build|
+            build_state = build['state'] # Example, adjust based on actual API response
+            job_name = build['jobs'].first['name'] # Example, adjust based on actual API response
+            created_at = Date.parse(build['created_at']) # Example, adjust based on actual API response
+
+            next if created_at < cutoff_date
+
+            buildkite_job_key = "[Buildkite] #{pipeline_slug} / #{job_name}"
+            if build_state == 'failed'
+              failed_tests[branch_name][buildkite_job_key] ||= Set.new
+              failed_tests[branch_name][buildkite_job_key] << created_at
+            end
+          end
+        end
+      else
+        log.warn("Buildkite token not found for organization #{org_slug}. Skipping Buildkite stats.")
+      end
+    else
+      log.info("No Buildkite badge found in README for #{repo}")
+    end
+  rescue Octokit::NotFound
+    log.warn("README.md not found for #{repo}. Skipping Buildkite integration.")
+  rescue StandardError => e
+    log.error("Error during Buildkite integration for #{repo}: #{e.message}")
+    log.debug(e.backtrace.join("\n"))
+  end
+
   processed_branches.each do |branch|
-    log.debug("Checking workflow runs for #{repo}, branch: #{branch}")
+    log.debug("Checking GitHub Actions workflow runs for #{repo}, branch: #{branch}")
     begin
       workflows = client.workflows(repo).workflows
       rate_limited_sleep
@@ -172,13 +222,14 @@ def get_failed_tests_from_ci(client, settings)
 
           jobs.each do |job|
             log.debug("    Looking at job #{job.name} [#{job.conclusion}]")
-            job_name_key = "#{workflow.name} / #{job.name}"
+            job_name_key = "[GitHub Actions] #{workflow.name} / #{job.name}" # Added prefix
             if job.conclusion == 'failure'
               failed_tests[branch][job_name_key] ||= Set.new
               failed_tests[branch][job_name_key] << run_date
               last_failure_date[job_name_key] = run_date
             elsif job.conclusion == 'success'
-              if last_failure_date[job_name_key] &&
+              # Ensure last_failure_date entry exists before trying to access it
+              if last_failure_date.key?(job_name_key) && last_failure_date[job_name_key] &&
                  last_failure_date[job_name_key] <= run_date
                 last_failure_date.delete(job_name_key)
               end
