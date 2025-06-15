@@ -105,7 +105,9 @@ RSpec.describe 'repo_stats' do
       allow(client).to receive(:readme).with('test_org/test_repo')
                                        .and_return(double(content: ''))
       allow(client).to receive(:workflows).and_return(
-        double(workflows: [double(id: 1, name: 'Test Workflow')]),
+        double(workflows: [
+          double(id: 1, name: 'Test Workflow', html_url: 'testurl'),
+        ]),
       )
       allow(client).to receive(:workflow_runs).with(
         'test_org/test_repo',
@@ -123,13 +125,13 @@ RSpec.describe 'repo_stats' do
       ).and_return(double(workflow_runs: []))
       allow(client).to receive(:workflow_run_jobs).and_return(
         double(jobs: [
-                 double(name: 'Test Job', conclusion: 'failure'),
-               ]),
+            double(name: 'Test Job', conclusion: 'failure'),
+        ]),
       )
 
       failed_tests = get_failed_tests_from_ci(client, nil, options, {})
 
-      expect(failed_tests['main']['Test Workflow / Test Job'])
+      expect(failed_tests['main']['Test Workflow / Test Job'][:dates])
         .to include(Date.today - 5)
     end
 
@@ -198,6 +200,18 @@ RSpec.describe 'repo_stats' do
         end
 
         it 'calls BuildkiteClient with correct slugs and processes results' do
+          expect(mock_buildkite_client).to receive(:get_pipeline)
+            .with('test-buildkite-org', 'actual-pipeline-name')
+            .and_return({
+              url: 'testurl',
+              slug: 'actual-pipeline-name',
+            })
+          expect(mock_buildkite_client).to receive(:get_pipeline)
+            .with('other-org', 'other-pipeline')
+            .and_return({
+              url: 'testurl',
+              slug: 'other-pipeline',
+            })
           expect(mock_buildkite_client).to receive(:get_pipeline_builds)
             .with(
               'test-buildkite-org',
@@ -232,10 +246,17 @@ RSpec.describe 'repo_stats' do
             client, mock_buildkite_client, settings_with_buildkite_token, {}
           )
           job1_key = '[BK] test-buildkite-org/actual-pipeline-name'
-          expect(failed_tests['main'][job1_key]).to include(Date.today - 1)
+          expect(failed_tests['main'][job1_key][:dates])
+            .to include(Date.today - 1)
         end
 
         it 'correctly parses alternative badge markdown format' do
+          expect(mock_buildkite_client).to receive(:get_pipeline)
+            .with('test-buildkite-org', 'another-actual-pipeline')
+            .and_return({
+              url: 'testurl',
+              slug: 'another-actual-pipelinename',
+            })
           allow(client).to receive(:readme)
             .with(repo_full_name)
             .and_return(
@@ -256,6 +277,18 @@ RSpec.describe 'repo_stats' do
         end
 
         it 'handles no failed builds from Buildkite' do
+          expect(mock_buildkite_client).to receive(:get_pipeline)
+            .with('test-buildkite-org', 'actual-pipeline-name')
+            .and_return({
+              url: 'testurl',
+              slug: 'actual-pipeline-name',
+            })
+          expect(mock_buildkite_client).to receive(:get_pipeline)
+            .with('other-org', 'other-pipeline')
+            .and_return({
+              url: 'testurl',
+              slug: 'other-pipeline',
+            })
           allow(mock_buildkite_client).to receive(:get_pipeline_builds)
             .and_return([
               {
@@ -302,6 +335,18 @@ RSpec.describe 'repo_stats' do
           end
 
           it 'correctly reports days for ongoing and fixed failures' do
+            expect(mock_buildkite_client).to receive(:get_pipeline)
+              .with('test-buildkite-org', 'actual-pipeline-name')
+              .and_return({
+                url: 'testurl',
+                slug: 'actual-pipeline-name',
+              })
+            expect(mock_buildkite_client).to receive(:get_pipeline)
+              .with('other-org', 'other-pipeline')
+              .and_return({
+                url: 'testurl',
+                slug: 'other-pipeline',
+              })
             allow(mock_buildkite_client).to receive(:get_pipeline_builds)
               .with(
                 org_name, pipeline_name, today - days_to_check, today, 'main'
@@ -321,8 +366,10 @@ RSpec.describe 'repo_stats' do
               # all days through today if the last check is failing
               today,
             ])
-            expect(failed_tests['main'][job_key]).to eq(expected_job_dates)
-            expect(failed_tests['main'][job_key].size).to eq(days_to_check - 1)
+            expect(failed_tests['main'][job_key][:dates])
+              .to eq(expected_job_dates)
+            expect(failed_tests['main'][job_key][:dates].size)
+              .to eq(days_to_check - 1)
           end
         end
       end
@@ -365,6 +412,12 @@ RSpec.describe 'repo_stats' do
           allow(mock_buildkite_client)
             .to receive(:get_pipeline_builds)
             .and_raise(StandardError.new('Buildkite API Error'))
+          allow(mock_buildkite_client)
+            .to receive(:get_pipeline)
+            .and_return({
+              url: 'testurl',
+              slug: 'actual-pipeline-name',
+            })
         end
 
         it 'handles the error gracefully and logs it' do
@@ -398,8 +451,14 @@ RSpec.describe 'repo_stats' do
       let(:test_failures) do
         {
           'main' => {
-            'GH Workflow / Job A' => Set[Date.today, Date.today - 1],
-            'GH Workflow / Job B' => Set[Date.today],
+            'GH Workflow / Job A' => {
+              dates: Set[Date.today, Date.today - 1],
+              url: 'testurla',
+            },
+            'GH Workflow / Job B' => {
+              dates: Set[Date.today],
+              url: 'testurlb',
+            },
           },
         }
       end
@@ -410,9 +469,9 @@ RSpec.describe 'repo_stats' do
         expect(OssStats::Log).to receive(:info)
           .with('    * Branch: `main` has the following failures:')
         expect(OssStats::Log).to receive(:info)
-          .with('        * GH Workflow / Job A: 2 days')
+          .with('        * [GH Workflow / Job A](testurla): 2 days')
         expect(OssStats::Log).to receive(:info)
-          .with('        * GH Workflow / Job B: 1 days')
+          .with('        * [GH Workflow / Job B](testurlb): 1 days')
         print_ci_status(test_failures)
       end
     end
@@ -421,8 +480,14 @@ RSpec.describe 'repo_stats' do
       let(:test_failures) do
         {
           'main' => {
-            '[BK] org/pipe1' => Set[Date.today],
-            '[BK] org/pipe2' => Set[Date.today, Date.today - 1, Date.today - 2],
+            '[BK] org/pipe1' => {
+              dates: Set[Date.today],
+              url: 'testurl1',
+            },
+            '[BK] org/pipe2' => {
+              dates: Set[Date.today, Date.today - 1, Date.today - 2],
+              url: 'testurl2',
+            },
           },
         }
       end
@@ -433,9 +498,9 @@ RSpec.describe 'repo_stats' do
         expect(OssStats::Log).to receive(:info)
           .with('    * Branch: `main` has the following failures:')
         expect(OssStats::Log).to receive(:info)
-          .with('        * [BK] org/pipe1: 1 days')
+          .with('        * [[BK] org/pipe1](testurl1): 1 days')
         expect(OssStats::Log).to receive(:info)
-          .with('        * [BK] org/pipe2: 3 days')
+          .with('        * [[BK] org/pipe2](testurl2): 3 days')
         print_ci_status(test_failures)
       end
     end
@@ -444,9 +509,18 @@ RSpec.describe 'repo_stats' do
       let(:test_failures) do
         {
           'main' => {
-            'GH Workflow / Job A' => Set[Date.today],
-            'Buildkite / org/pipe / Job X' => Set[Date.today - 1],
-            'GH Workflow / Job C' => Set[Date.today - 2, Date.today - 3],
+            'GH Workflow / Job A' => {
+              dates: Set[Date.today],
+              url: 'testurla',
+            },
+            'Buildkite / org/pipe / Job X' => {
+              dates: Set[Date.today - 1],
+              url: 'testurlx',
+            },
+            'GH Workflow / Job C' => {
+              dates: Set[Date.today - 2, Date.today - 3],
+              url: 'testurlc',
+            },
           },
         }
       end
@@ -458,11 +532,12 @@ RSpec.describe 'repo_stats' do
           .with('    * Branch: `main` has the following failures:')
         # Sorted order: Buildkite job first, then GH jobs
         expect(OssStats::Log).to receive(:info)
-          .with('        * Buildkite / org/pipe / Job X: 1 days').ordered
+          .with('        * [Buildkite / org/pipe / Job X](testurlx): 1 days')
+          .ordered
         expect(OssStats::Log).to receive(:info)
-          .with('        * GH Workflow / Job A: 1 days').ordered
+          .with('        * [GH Workflow / Job A](testurla): 1 days').ordered
         expect(OssStats::Log).to receive(:info)
-          .with('        * GH Workflow / Job C: 2 days').ordered
+          .with('        * [GH Workflow / Job C](testurlc): 2 days').ordered
         print_ci_status(test_failures)
       end
     end
@@ -482,9 +557,18 @@ RSpec.describe 'repo_stats' do
     context 'with failures on multiple branches' do
       let(:test_failures) do
         {
-          'main' => { 'GH Workflow / Job A' => Set[Date.today] },
-          'develop' => { '[BK] org/pipe' => Set[Date.today - 1,
-Date.today - 2] },
+          'main' => {
+            'GH Workflow / Job A' => {
+              dates: Set[Date.today],
+              url: 'testurla',
+            },
+          },
+          'develop' => {
+            '[BK] org/pipe' => {
+              dates: Set[Date.today - 1, Date.today - 2],
+              url: 'testurlp',
+            },
+          },
         }
       end
 
@@ -494,11 +578,11 @@ Date.today - 2] },
         expect(OssStats::Log).to receive(:info)
           .with('    * Branch: `develop` has the following failures:')
         expect(OssStats::Log).to receive(:info)
-          .with('        * [BK] org/pipe: 2 days')
+          .with('        * [[BK] org/pipe](testurlp): 2 days')
         expect(OssStats::Log).to receive(:info)
           .with('    * Branch: `main` has the following failures:')
         expect(OssStats::Log).to receive(:info)
-          .with('        * GH Workflow / Job A: 1 days')
+          .with('        * [GH Workflow / Job A](testurla): 1 days')
 
         print_ci_status(test_failures)
       end

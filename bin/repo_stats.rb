@@ -131,7 +131,7 @@ def get_pr_and_issue_stats(gh_client, options)
   { pr: pr_stats, issue: issue_stats, pr_list: prs, issue_list: issues }
 end
 
-def pipelines_from_readme(readme)
+def pipelines_from_readme(readme, bk_client)
   pipelines = []
   # Regex to find Buildkite badge markdown and capture the pipeline slug
   # from the link URL. Example:
@@ -151,7 +151,12 @@ def pipelines_from_readme(readme)
   matches.each do |match|
     buildkite_org = match[1]
     pipeline = match[2]
-    pipelines << { org: buildkite_org, pipeline: }
+    pk = bk_client.get_pipeline(buildkite_org, pipeline)
+    pipelines << {
+      pipeline:,
+      org: buildkite_org,
+      url: pk['url'],
+    }
 
     log.debug(
       "Found Buildkite pipeline: #{buildkite_org}/#{pipeline} in README",
@@ -171,6 +176,7 @@ def get_bk_failed_tests(
       {
         org: OssStats::Config::RepoStats.buildkite_org,
         pipeline: x[:slug],
+        url: x[:url],
       }
     end,
   )
@@ -179,7 +185,7 @@ def get_bk_failed_tests(
     readme = Base64.decode64(gh_client.readme(repo).content)
     rate_limited_sleep
 
-    pipelines_to_check.merge(pipelines_from_readme(readme))
+    pipelines_to_check.merge(pipelines_from_readme(readme, bk_client))
   rescue Octokit::NotFound
     log.warn(
       "README.md not found for repo #{repo}. Skipping Buildkite check.",
@@ -239,7 +245,9 @@ def get_bk_failed_tests(
         job_key = "[BK] #{pl[:org]}/#{pl[:pipeline]}"
 
         if build['state'] == 'FAILED'
-          (failed_tests[branch][job_key] ||= Set.new) << build_date
+          # we link to the pipeline, not the specific build
+          failed_tests[branch][job_key] ||= { url: pl[:url], dates: Set.new }
+          failed_tests[branch][job_key][:dates] << build_date
           log.debug("Marking #{job_key} as failed (#{id} on #{build_date})")
           last_failure_date_bk[job_key] = build_date
         elsif build['state'] == 'PASSED'
@@ -266,7 +274,7 @@ def get_bk_failed_tests(
       # mark all subsequent days until today as failed.
       last_failure_date_bk.each do |job_key, last_fail_date|
         (last_fail_date + 1..today).each do |date|
-          (failed_tests[branch][job_key] ||= Set.new) << date
+          failed_tests[branch][job_key][:dates] << date
         end
       end
     end
@@ -327,8 +335,21 @@ def get_gh_failed_tests(gh_client, repo, settings, branches)
           job_name_key = "#{workflow.name} / #{job.name}"
           if job.conclusion == 'failure'
             log.debug("Marking #{job_name_key} as failed (#{run_date})")
-            failed_tests[branch][job_name_key] ||= Set.new
-            failed_tests[branch][job_name_key] << run_date
+            # we want to link to the _workflow_ on the relevant branch.
+            # If we link to a job, it's only on that given run, which
+            # isn't relevant to our reports, we want people to go see
+            # the current status and all the passes and failures.
+            #
+            # However, the link to the workflow is to the file that defines it,
+            # which is not what we want, but it's easy to munge.
+            url = workflow.html_url.gsub("blob/#{branch}", 'actions')
+            url << "?query=branch%3A#{branch}"
+            failed_tests[branch][job_name_key] ||= {
+              # link to the workflow, not this specific run
+              url:,
+              dates: Set.new,
+            }
+            failed_tests[branch][job_name_key][:dates] << run_date
             last_failure_date[job_name_key] = run_date
           elsif job.conclusion == 'success'
             if last_failure_date[job_name_key] &&
@@ -346,7 +367,7 @@ def get_gh_failed_tests(gh_client, repo, settings, branches)
       end
       last_failure_date.each do |job_key, last_fail_date|
         (last_fail_date + 1..today).each do |date|
-          (failed_tests[branch][job_key] ||= Set.new) << date
+          failed_tests[branch][job_key][:dates] << date
         end
       end
     end
@@ -431,10 +452,16 @@ def print_pr_or_issue_stats(data, type, include_list)
   log.info("    * Closed #{type_plural}: #{stats[:closed]}")
   if include_list
     list[:closed].each do |item|
-      log.info(
-        "        * [#{item.title} (##{item.number})](#{item.html_url}) " +
-        "- @#{item.user.login}",
-      )
+      if OssStats::Config::RepoStats.no_links
+        log.info(
+          "        * #{item.title} (##{item.number}) - @#{item.user.login}",
+        )
+      else
+        log.info(
+          "        * [#{item.title} (##{item.number})](#{item.html_url}) " +
+          "- @#{item.user.login}",
+        )
+      end
     end
   end
   log.info(
@@ -444,10 +471,16 @@ def print_pr_or_issue_stats(data, type, include_list)
   )
   if include_list && stats[:opened_this_period].positive?
     list[:open].each do |item|
-      log.info(
-        "        * [#{item.title} (##{item.number})](#{item.html_url}) " +
-        "- @#{item.user.login}",
-      )
+      if OssStats::Config::RepoStats.no_links
+        log.info(
+          "        * #{item.title} (##{item.number}) - @#{item.user.login}",
+        )
+      else
+        log.info(
+          "        * [#{item.title} (##{item.number})](#{item.html_url}) " +
+          "- @#{item.user.login}",
+        )
+      end
     end
   end
   if stats[:oldest_open]
@@ -483,14 +516,21 @@ def print_ci_status(test_failures)
       log.info(line + ': No job failures found! :tada:')
     else
       log.info(line + ' has the following failures:')
-      jobs.sort.each do |job, dates|
-        log.info("        * #{job}: #{dates.size} days")
+      jobs.sort.each do |job_name, job_data|
+        if OssStats::Config::RepoStats.no_links
+          log.info("        * #{job_name}: #{job_data[:dates].size} days")
+        else
+          log.info(
+            "        * [#{job_name}](#{job_data[:url]}):" +
+            " #{job_data[:dates].size} days",
+          )
+        end
       end
     end
   end
 end
 
-def parse_options # rubocop:disable Metrics/MethodLength, Metrics/AbcSize
+def parse_options
   options = {}
   valid_modes = %w{ci pr issue all}
   OptionParser.new do |opts|
@@ -584,6 +624,11 @@ def parse_options # rubocop:disable Metrics/MethodLength, Metrics/AbcSize
       %i{trace debug info warn error fatal},
       'Set logging level to LEVEL. [default: info]',
     ) { |level| options[:log_level] = level }
+
+    opts.on(
+      '--no-links',
+      'Disable Markdown links in the output (default: false)',
+    ) { options[:no_links] = true }
 
     opts.on(
       '--mode MODE',
@@ -720,7 +765,7 @@ def main
     bk_pipelines_by_repo = bk_client.pipelines_by_repo(config.buildkite_org)
   end
 
-  config.organizations.each do |org_name, org_level_config|
+  organizations_to_process.each do |org_name, org_level_config|
     log.debug("Processing configuration for organization: #{org_name}")
     repos = org_level_config['repositories'] || {}
     repos.each do |repo_name, repo_level_config|
@@ -742,10 +787,16 @@ def main
   repos_to_process.each do |settings|
     repo_full_name = "#{settings[:org]}/#{settings[:repo]}"
     repo_url = "https://github.com/#{repo_full_name}"
-    log.info(
-      "\n*_[#{repo_full_name}](#{repo_url}) Stats " +
-      "(Last #{settings[:days]} days)_*",
-    )
+    if OssStats::Config::RepoStats.no_links
+      log.info(
+        "\n* #{repo_full_name} Stats (Last #{settings[:days]} days) *",
+      )
+    else
+      log.info(
+        "\n*_[#{repo_full_name}](#{repo_url}) Stats " +
+        "(Last #{settings[:days]} days)_*",
+      )
+    end
 
     # Fetch and print PR and Issue stats if PR or Issue mode is active
     if %w{pr issue}.any? { |m| mode.include?(m) }

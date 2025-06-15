@@ -13,6 +13,7 @@ module OssStats
       default_days 30
       log_level :info
       ci_timeout 600
+      no_links false
       github_api_endpoint nil
       github_token nil
       github_org nil

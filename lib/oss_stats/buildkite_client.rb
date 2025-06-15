@@ -25,6 +25,7 @@ module OssStats
         query {
           pipeline(slug: "#{org}/#{pipeline}") {
             visibility
+            url
           }
         }
       GRAPHQL
@@ -74,6 +75,7 @@ module OssStats
                       url
                     }
                     visibility
+                    url
                   }
                 }
                 pageInfo {
@@ -115,6 +117,7 @@ module OssStats
 
         pipelines_by_repo[repo_url] << {
           slug: pipeline['slug'],
+          url: pipeline['url'],
           visibility: pipeline['visibility'],
         }
       end
@@ -134,6 +137,7 @@ module OssStats
     #   'createdAt', and 'jobs'.
     #   Returns an empty array if an error occurs or no builds are found.
     def get_pipeline_builds(org, pipeline, from_date, to_date, branch = 'main')
+      log.debug("get_pipeline_builds: #{org}, #{pipeline}")
       all_build_edges = []
       after_cursor = nil
       has_next_page = true
