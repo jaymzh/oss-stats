@@ -6,6 +6,7 @@ gem 'faraday-retry'
 gem 'gruff'
 gem 'mixlib-log'
 gem 'mixlib-config'
+gem 'deep_merge'
 
 group(:development) do
   # for cookstyle

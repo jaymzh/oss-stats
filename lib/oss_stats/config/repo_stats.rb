@@ -7,6 +7,8 @@ module OssStats
       extend Mixlib::Config
       extend OssStats::Config::Shared
 
+      # generally this shouldn't be set, it overrides everything
+      days nil
       default_branches ['main']
       default_days 30
       log_level :info
