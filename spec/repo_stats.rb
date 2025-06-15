@@ -1,11 +1,11 @@
 require 'rspec'
 require 'octokit'
 require 'base64'
-require_relative '../src/ci_stats'
-require_relative '../src/lib/oss_stats/ci_stats_config'
-require_relative '../src/lib/oss_stats/log'
+require_relative '../bin/repo_stats'
+require_relative '../lib/oss_stats/repo_stats_config'
+require_relative '../lib/oss_stats/log'
 
-RSpec.describe 'ci_status' do
+RSpec.describe 'repo_stats' do
   let(:client) { instance_double(Octokit::Client) }
   let(:options) do
     {

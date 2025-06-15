@@ -5,7 +5,7 @@ DRYRUN=0
 FORCE=0
 DIRS=(
     data
-    ci_reports
+    repo_reports
     pipeline_visibility_reports
     promises
     images
@@ -112,15 +112,15 @@ OK, this directory is setup. Your next step is to modify the config files in
 this directory, and do an initial run. Generally the first script people are
 interested in would be run like:
 
-  ../oss-stats/src/ci_stats.rb --org <YOUR_ORG> --repo <SOME_REPO>
+  ../oss-stats/bin/repo_stats.rb --org <YOUR_ORG> --repo <SOME_REPO>
 
 We recommend running it regularly (e.g. weekly) and storing the output in the
-ci_reports directory we've created, ala:
+repo_reports directory we've created, ala:
 
   date=$(date '+%Y-%m-%d')
-  out="ci_reports/${date}.md"
+  out="repo_reports/${date}.md"
   for repo in $repos; do
-    ../oss-stats/src/ci_stats.rb --org <YOUR_ORG> --repo $repo >> $out
+    ../oss-stats/bin/repo_stats.rb --org <YOUR_ORG> --repo $repo >> $out
   done
 
 EOF

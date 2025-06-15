@@ -6,8 +6,8 @@ require 'sqlite3'
 require 'fileutils'
 require 'gruff'
 
-require_relative 'lib/oss_stats/log'
-require_relative 'lib/oss_stats/meeting_stats_config'
+require_relative '../lib/oss_stats/log'
+require_relative '../lib/oss_stats/config/meeting_stats'
 
 # Initialize database
 def initialize_db(db_file)
@@ -77,7 +77,7 @@ end
 
 # Collect team data from user
 def collect_team_data(meeting_date)
-  teams = OssStats::MeetingStatsConfig.teams
+  teams = OssStats::Config::MeetingStats.teams
   team_data = {}
 
   log.info("Please fill in data about the #{meeting_date} meeting\n")
@@ -217,7 +217,7 @@ def generate_md_page(db_file)
     'SELECT DISTINCT meeting_date FROM meeting_stats ORDER BY meeting_date' +
     ' DESC',
   ).flatten
-  md = [OssStats::MeetingStatsConfig.header]
+  md = [OssStats::Config::MeetingStats.header]
 
   meeting_dates.each do |meeting_date|
     team_data = db.execute(
@@ -400,22 +400,22 @@ OptionParser.new do |opts|
   end
 end.parse!
 log.level = options[:log_level] if options[:log_level]
+config = OssStats::Config::MeetingStats
 
 if options[:config]
   expanded_config = File.expand_path(options[:config])
 else
-  f = OssStats::MeetingStatsConfig.config_file
+  f = config.config_file
   expanded_config = File.expand_path(f) if f
 end
 
 if expanded_config && File.exist?(expanded_config)
   log.info("Loading config from #{expanded_config}")
-  OssStats::MeetingStatsConfig.from_file(expanded_config)
+  config.from_file(expanded_config)
 end
-OssStats::MeetingStatsConfig.merge!(options)
-log.level = OssStats::MeetingStatsConfig.log_level
+config.merge!(options)
+log.level = config.log_level
 
-config = OssStats::MeetingStatsConfig
 log.debug("Full config: #{config.to_hash}")
 
 initialize_db(config.db_file)

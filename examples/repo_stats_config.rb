@@ -1,4 +1,4 @@
-# Example configuration file for ci_stats
+# Example configuration file for repo_stats
 
 # You can specify branches for specific repos under 'organizations'
 # below, but for anything not specified it'll use `default_branches`
