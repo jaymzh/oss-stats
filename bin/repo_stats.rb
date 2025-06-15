@@ -650,6 +650,7 @@ def get_effective_repo_settings(org, repo, org_conf = {}, repo_conf = {})
 end
 
 def determine_orgs_to_process
+  config = OssStats::Config::RepoStats
   relevant_orgs = {}
   # Handle org/repo specified via CLI: overrides any config file orgs/repos.
   if config.github_org || config.github_repo
