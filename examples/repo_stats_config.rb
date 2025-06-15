@@ -3,6 +3,9 @@
 # You can specify branches for specific repos under 'organizations'
 # below, but for anything not specified it'll use `default_branches`
 # (which defaults to ['main'])
+#
+# Note do NOT set 'days' or 'branches' in your config, as that overrides
+# everything and is meant for CLI options.
 default_branches %w{main v2}
 default_days 30
 # you can specify 'days', but it will override everything, including

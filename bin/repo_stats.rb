@@ -403,7 +403,7 @@ end
 # @param bk_client [BuildkiteClient] A buildkite client
 # @param settings [Hash] A hash containing settings like :org, :repo, :days, and
 #   :branches.
-# @param bk_piplines_by_rep [Hash] A hash of repo -> list of BK pipelines
+# @param bk_piplines_by_repo [Hash] A hash of repo -> list of BK pipelines
 # @return [Hash] A hash where keys are branch names, and values are hashes of
 #   job names to a Set of dates the job failed.
 def get_failed_tests_from_ci(
@@ -537,9 +537,19 @@ def parse_options
     opts.banner = "Usage: #{File.basename($PROGRAM_NAME)} [options]"
 
     opts.on(
+      '-b BRANCHES',
       '--branches BRANCHES',
       Array,
-      'Comma-separated list of branches',
+      'Comma-separated list of branches. Overrides specific org or repo' +
+        ' configs',
+    ) { |v| options[:branches] = v }
+
+    opts.on(
+      '-B BRANCHES',
+      '--default-branches BRANCHES',
+      Array,
+      'Comma-separated list of branches. will be overriden by specific org' +
+        ' or repo configs',
     ) { |v| options[:default_branches] = v }
 
     opts.on(
@@ -679,11 +689,11 @@ def get_effective_repo_settings(org, repo, org_conf = {}, repo_conf = {})
   effective = { org:, repo: }
   config = OssStats::Config::RepoStats
 
-  # we allow somone to override days for the entire run (config.days) which
-  # is different from the fallback (config.default_days)
+  # we allow somone to override days or branches for the entire run
+  # which is different from the fallback (default_{days,branches})
   effective[:days] = config.days || repo_conf['days'] ||
                      org_conf['days'] || config.default_days
-  branches_setting = repo_conf['branches'] ||
+  branches_setting = config.branches || repo_conf['branches'] ||
                      org_conf['branches'] || config.default_branches
   effective[:branches] =
     if branches_setting.is_a?(String)

@@ -646,6 +646,7 @@ RSpec.describe 'repo_stats' do
   describe '#get_effective_repo_settings' do
     before(:each) do
       OssStats::Config::RepoStats.days = nil
+      OssStats::Config::RepoStats.branches = nil
       OssStats::Config::RepoStats.default_days = 15
       OssStats::Config::RepoStats.default_branches = ['foo']
     end
@@ -702,6 +703,20 @@ RSpec.describe 'repo_stats' do
         expect(s[:days]).to eq(11)
         # most specific branches setting is from repo
         expect(s[:branches]).to eq(['special'])
+      end
+
+      it 'overrides default org and repo with cli branches settings' do
+        OssStats::Config::RepoStats.branches = ['somebranch']
+        s = get_effective_repo_settings(
+          'org1',
+          'repo1',
+          { 'days' => 77, 'branches' => ['release'] },
+          { 'days' => 99, 'branches' => ['special'] },
+        )
+        # days comes from CLI override
+        expect(s[:days]).to eq(99)
+        # most specific branches setting is from repo
+        expect(s[:branches]).to eq(['somebranch'])
       end
     end
   end
