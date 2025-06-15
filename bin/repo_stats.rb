@@ -1,17 +1,18 @@
 #!/usr/bin/env ruby
 
-require 'optparse'
-require 'date'
-require 'yaml'
-require 'octokit'
 require 'base64'
+require 'date'
+require 'deep_merge'
+require 'octokit'
+require 'optparse'
 require 'set'
+require 'yaml'
 
-require_relative '../lib/oss_stats/log'
+require_relative '../lib/oss_stats/buildkite_client'
+require_relative '../lib/oss_stats/buildkite_token'
 require_relative '../lib/oss_stats/config/repo_stats'
 require_relative '../lib/oss_stats/github_token'
-require_relative '../lib/oss_stats/buildkite_token'
-require_relative '../lib/oss_stats/buildkite_client'
+require_relative '../lib/oss_stats/log'
 
 def rate_limited_sleep
   limit_gh_ops_per_minute = OssStats::Config::RepoStats.limit_gh_ops_per_minute
@@ -160,6 +161,211 @@ def pipelines_from_readme(readme)
   pipelines
 end
 
+def get_bk_failed_tests(
+  gh_client, bk_client, repo, bk_pipelines_by_repo, settings, branches
+)
+  failed_tests = {}
+  pipelines_to_check = Set.new
+  pipelines_to_check.merge(
+    bk_pipelines_by_repo.fetch("https://github.com/#{repo}", []).map do |x|
+      {
+        org: OssStats::Config::RepoStats.buildkite_org,
+        pipeline: x[:slug],
+      }
+    end,
+  )
+
+  begin
+    readme = Base64.decode64(gh_client.readme(repo).content)
+    rate_limited_sleep
+
+    pipelines_to_check.merge(pipelines_from_readme(readme))
+  rescue Octokit::NotFound
+    log.warn(
+      "README.md not found for repo #{repo}. Skipping Buildkite check.",
+    )
+  end
+
+  from_date = Date.today - settings[:days]
+  today = Date.today
+  pipelines_to_check.each do |pl|
+    branches.each do |branch|
+      log.debug(
+        "Fetching Buildkite builds for #{pl}, branch: #{branch}",
+      )
+      api_builds = bk_client.get_pipeline_builds(
+        pl[:org], pl[:pipeline], from_date, today, branch
+      )
+      if api_builds.length.zero?
+        log.debug("No builds for #{pl} on #{branch}")
+        next
+      end
+
+      failed_tests[branch] ||= {}
+
+      # Sort builds by createdAt timestamp to process chronologically
+      # rubocop:disable Style/MultilineBlockChain
+      sorted_builds = api_builds.select do |b_edge|
+        b_edge&.dig('node', 'createdAt')
+      end.sort_by { |b_edge| DateTime.parse(b_edge['node']['createdAt']) }
+      # rubocop:enable Style/MultilineBlockChain
+
+      last_failure_date_bk = {}
+
+      sorted_builds.each do |build_edge|
+        build = build_edge['node']
+        id = build['id']
+        log.debug("Build #{id} for #{pl}")
+        begin
+          build_date = DateTime.parse(build['createdAt']).to_date
+        rescue ArgumentError, TypeError
+          log.warn(
+            "Invalid createdAt date for build in #{pl}: " +
+            "'#{build['createdAt']}'. Skipping this build.",
+          )
+          next
+        end
+
+        # Ensure build is within the processing date range
+        if build_date < from_date
+          log.debug('Build before time we care about, skipping')
+          next
+        end
+
+        unless build['state']
+          log.debug('no build state, skipping')
+          next
+        end
+        job_key = "[BK] #{pl[:org]}/#{pl[:pipeline]}"
+
+        if build['state'] == 'FAILED'
+          (failed_tests[branch][job_key] ||= Set.new) << build_date
+          log.debug("Marking #{job_key} as failed (#{id} on #{build_date})")
+          last_failure_date_bk[job_key] = build_date
+        elsif build['state'] == 'PASSED'
+          # If a job passes, and it had a recorded failure on or before this
+          # build's date, clear it from ongoing failures.
+          if last_failure_date_bk[job_key] &&
+             last_failure_date_bk[job_key] <= build_date
+            log.debug(
+              "Unmarking #{job_key} as failed (#{id} on #{build_date})",
+            )
+            last_failure_date_bk.delete(job_key)
+          else
+            log.debug(
+              "Ignoring #{job_key} success earlier than last failure" +
+              " (#{id} on #{build_date})",
+            )
+          end
+        else
+          log.debug("State is #{build['state']}, ignoring")
+        end
+      end
+
+      # Propagate ongoing failures: if a job failed and didn't pass later,
+      # mark all subsequent days until today as failed.
+      last_failure_date_bk.each do |job_key, last_fail_date|
+        (last_fail_date + 1..today).each do |date|
+          (failed_tests[branch][job_key] ||= Set.new) << date
+        end
+      end
+    end
+  end
+
+  failed_tests
+rescue StandardError => e
+  log.error("Error during Buildkite integration for #{repo}: #{e.message}")
+  log.debug(e.backtrace.join("\n"))
+  # we may have captured some, return what we got
+  failed_tests
+end
+
+def get_gh_failed_tests(gh_client, repo, settings, branches)
+  failed_tests = {}
+  cutoff_date = Date.today - settings[:days]
+  today = Date.today
+  branches.each do |branch|
+    log.debug(
+      "Checking GitHub Actions workflow runs for #{repo}, branch: #{branch}",
+    )
+    failed_tests[branch] ||= {}
+    workflows = gh_client.workflows(repo).workflows
+    rate_limited_sleep
+    workflows.each do |workflow|
+      log.debug("Workflow: #{workflow.name}")
+      workflow_runs = []
+      page = 1
+      loop do
+        log.debug("  Acquiring page #{page}")
+        runs = gh_client.workflow_runs(
+          repo, workflow.id, branch:, status: 'completed', per_page: 100,
+          page:
+        )
+        rate_limited_sleep
+
+        break if runs.workflow_runs.empty?
+
+        workflow_runs.concat(runs.workflow_runs)
+
+        break if workflow_runs.last.created_at.to_date < cutoff_date
+
+        page += 1
+      end
+
+      workflow_runs.sort_by!(&:created_at).reverse!
+      last_failure_date = {}
+      workflow_runs.each do |run|
+        log.debug("  Looking at workflow run #{run.id}")
+        run_date = run.created_at.to_date
+        next if run_date < cutoff_date
+
+        jobs = gh_client.workflow_run_jobs(repo, run.id, per_page: 100).jobs
+        rate_limited_sleep
+
+        jobs.each do |job|
+          log.debug("    Looking at job #{job.name} [#{job.conclusion}]")
+          job_name_key = "#{workflow.name} / #{job.name}"
+          if job.conclusion == 'failure'
+            log.debug("Marking #{job_name_key} as failed (#{run_date})")
+            failed_tests[branch][job_name_key] ||= Set.new
+            failed_tests[branch][job_name_key] << run_date
+            last_failure_date[job_name_key] = run_date
+          elsif job.conclusion == 'success'
+            if last_failure_date[job_name_key] &&
+               last_failure_date[job_name_key] <= run_date
+              log.debug("Unmarking #{job_name_key} as failed (#{run_date})")
+              last_failure_date.delete(job_name_key)
+            else
+              log.debug(
+                "Ignoring #{job_name_key} success early then last failure" +
+                "(#{run_date})",
+              )
+            end
+          end
+        end
+      end
+      last_failure_date.each do |job_key, last_fail_date|
+        (last_fail_date + 1..today).each do |date|
+          (failed_tests[branch][job_key] ||= Set.new) << date
+        end
+      end
+    end
+  end
+
+  failed_tests
+rescue Octokit::NotFound => e
+  log.warn(
+    "Workflow API returned 404 for #{repo} branch " +
+    "#{branch}: #{e.message}.",
+  )
+rescue Octokit::Error, StandardError => e
+  log.error(
+    "Error processing branch #{branch} for repo " +
+    "#{repo}: #{e.message}",
+  )
+  log.debug(e.backtrace.join("\n"))
+end
+
 # Fetches failed test results from CI systems (GitHub Actions and Buildkite)
 # for a given repository and branches.
 #
@@ -173,210 +379,38 @@ end
 #
 # @param gh_client [Octokit::Client] The Octokit client for GitHub API
 #   interaction.
+# @param bk_client [BuildkiteClient] A buildkite client
 # @param settings [Hash] A hash containing settings like :org, :repo, :days, and
 #   :branches.
+# @param bk_piplines_by_rep [Hash] A hash of repo -> list of BK pipelines
 # @return [Hash] A hash where keys are branch names, and values are hashes of
 #   job names to a Set of dates the job failed.
 def get_failed_tests_from_ci(
   gh_client, bk_client, settings, bk_pipelines_by_repo
 )
   repo = "#{settings[:org]}/#{settings[:repo]}"
-  cutoff_date = Date.today - settings[:days]
-  today = Date.today
-  failed_tests = {}
   branches_to_check = settings[:branches]
   processed_branches = if branches_to_check.is_a?(String)
                          branches_to_check.split(',').map(&:strip)
                        else
                          Array(branches_to_check).map(&:strip)
                        end
-  processed_branches.each { |b| failed_tests[b] = {} }
 
-  # Buildkite CI
+  failed_tests = get_gh_failed_tests(
+    gh_client, repo, settings, processed_branches
+  )
+
   if bk_client
-    begin
-      log.debug("Checking for Buildkite integration for #{repo}")
-      pipelines_to_check = Set.new
-      pipelines_to_check.merge(
-        bk_pipelines_by_repo.fetch("https://github.com/#{repo}", []).map do |x|
-          {
-            org: OssStats::Config::RepoStats.buildkite_org,
-            pipeline: x[:slug],
-          }
-        end,
-      )
-      begin
-        readme = Base64.decode64(gh_client.readme(repo).content)
-        rate_limited_sleep
-
-        pipelines_to_check.merge(pipelines_from_readme(readme))
-      rescue Octokit::NotFound
-        log.warn(
-          "README.md not found for repo #{repo}. Skipping Buildkite check.",
-        )
-      end
-
-      from_date = Date.today - settings[:days]
-      today = Date.today
-      pipelines_to_check.each do |pl|
-        processed_branches.each do |branch|
-          log.debug(
-            "Fetching Buildkite builds for #{pl}, branch: #{branch}",
-          )
-          api_builds = bk_client.get_pipeline_builds(
-            pl[:org], pl[:pipeline], from_date, today, branch
-          )
-          if api_builds.length.zero?
-            log.debug("No builds for #{pl} on #{branch}")
-            next
-          end
-
-          # Sort builds by createdAt timestamp to process chronologically
-          # rubocop:disable Style/MultilineBlockChain
-          sorted_builds = api_builds.select do |b_edge|
-            b_edge&.dig('node', 'createdAt')
-          end.sort_by { |b_edge| DateTime.parse(b_edge['node']['createdAt']) }
-          # rubocop:enable Style/MultilineBlockChain
-
-          last_failure_date_bk = {}
-
-          sorted_builds.each do |build_edge|
-            build = build_edge['node']
-            id = build['id']
-            log.debug("Build #{id} for #{pl}")
-            begin
-              build_date = DateTime.parse(build['createdAt']).to_date
-            rescue ArgumentError, TypeError
-              log.warn(
-                "Invalid createdAt date for build in #{pl}: " +
-                "'#{build['createdAt']}'. Skipping this build.",
-              )
-              next
-            end
-
-            # Ensure build is within the processing date range
-            if build_date < from_date
-              log.debug('Build before time we care about, skipping')
-              next
-            end
-
-            unless build['state']
-              log.debug('no build state, skipping')
-              next
-            end
-            job_key = "[BK] #{pl[:org]}/#{pl[:pipeline]}"
-
-            if build['state'] == 'FAILED'
-              (failed_tests[branch][job_key] ||= Set.new) << build_date
-              log.debug("Marking #{job_key} as failed (#{id} on #{build_date})")
-              last_failure_date_bk[job_key] = build_date
-            elsif build['state'] == 'PASSED'
-              # If a job passes, and it had a recorded failure on or before this
-              # build's date, clear it from ongoing failures.
-              if last_failure_date_bk[job_key] &&
-                 last_failure_date_bk[job_key] <= build_date
-                log.debug(
-                  "Unmarking #{job_key} as failed (#{id} on #{build_date})",
-                )
-                last_failure_date_bk.delete(job_key)
-              else
-                log.debug(
-                  "Ignoring #{job_key} success earlier than last failure" +
-                  " (#{id} on #{build_date})",
-                )
-              end
-            else
-              log.debug("State is #{build['state']}, ignoring")
-            end
-          end
-
-          # Propagate ongoing failures: if a job failed and didn't pass later,
-          # mark all subsequent days until today as failed.
-          last_failure_date_bk.each do |job_key, last_fail_date|
-            (last_fail_date + 1..today).each do |date|
-              (failed_tests[branch][job_key] ||= Set.new) << date
-            end
-          end
-        end
-      end
-    rescue StandardError => e
-      log.error("Error during Buildkite integration for #{repo}: #{e.message}")
-      log.debug(e.backtrace.join("\n"))
-    end
-  end
-
-  # GitHub Actions CI
-  processed_branches.each do |branch|
-    log.debug(
-      "Checking GitHub Actions workflow runs for #{repo}, branch: #{branch}",
+    failed_tests.deep_merge!(
+      get_bk_failed_tests(
+        gh_client,
+        bk_client,
+        repo,
+        bk_pipelines_by_repo,
+        settings,
+        processed_branches,
+      ),
     )
-    begin
-      workflows = gh_client.workflows(repo).workflows
-      rate_limited_sleep
-      workflows.each do |workflow|
-        log.debug("Workflow: #{workflow.name}")
-        workflow_runs = []
-        page = 1
-        loop do
-          log.debug("  Acquiring page #{page}")
-          runs = gh_client.workflow_runs(
-            repo, workflow.id, branch:, status: 'completed', per_page: 100,
-            page:
-          )
-          rate_limited_sleep
-
-          break if runs.workflow_runs.empty?
-
-          workflow_runs.concat(runs.workflow_runs)
-
-          break if workflow_runs.last.created_at.to_date < cutoff_date
-
-          page += 1
-        end
-
-        workflow_runs.sort_by!(&:created_at).reverse!
-        last_failure_date = {}
-        workflow_runs.each do |run|
-          log.debug("  Looking at workflow run #{run.id}")
-          run_date = run.created_at.to_date
-          next if run_date < cutoff_date
-
-          jobs = gh_client.workflow_run_jobs(repo, run.id, per_page: 100).jobs
-          rate_limited_sleep
-
-          jobs.each do |job|
-            log.debug("    Looking at job #{job.name} [#{job.conclusion}]")
-            job_name_key = "#{workflow.name} / #{job.name}"
-            if job.conclusion == 'failure'
-              failed_tests[branch][job_name_key] ||= Set.new
-              failed_tests[branch][job_name_key] << run_date
-              last_failure_date[job_name_key] = run_date
-            elsif job.conclusion == 'success'
-              if last_failure_date[job_name_key] &&
-                 last_failure_date[job_name_key] <= run_date
-                last_failure_date.delete(job_name_key)
-              end
-            end
-          end
-        end
-        last_failure_date.each do |job_key, last_fail_date|
-          (last_fail_date + 1..today).each do |date|
-            (failed_tests[branch][job_key] ||= Set.new) << date
-          end
-        end
-      end
-    rescue Octokit::NotFound => e
-      log.warn(
-        "Workflow API returned 404 for #{repo} branch " +
-        "#{branch}: #{e.message}.",
-      )
-    rescue Octokit::Error, StandardError => e
-      log.error(
-        "Error processing branch #{branch} for repo " +
-        "#{repo}: #{e.message}",
-      )
-      log.debug(e.backtrace.join("\n"))
-    end
   end
 
   failed_tests
