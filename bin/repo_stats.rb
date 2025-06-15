@@ -530,6 +530,16 @@ def print_ci_status(test_failures)
   end
 end
 
+# Helper function to parse a value that can be an integer or percentage
+def parse_value_or_percentage(value_str)
+  if value_str.end_with?('%')
+    # Convert percentage to a float representation (e.g., "5%" -> 0.05)
+    value_str.chomp('%').to_f / 100.0
+  else
+    value_str.to_i
+  end
+end
+
 def parse_options
   options = {}
   valid_modes = %w{ci pr issue all}
@@ -652,6 +662,50 @@ def parse_options
           "Valid modes are: #{valid_modes.join(', ')}"
       end
       options[:mode] = v.map(&:downcase)
+    end
+
+    opts.on('--top-n-stale N', String, 'Top N or N% stale PRs/Issues') do |v|
+      options[:top_n_stale] = parse_value_or_percentage(v)
+    end
+
+    opts.on('--top-n-oldest N', String, 'Top N or N% oldest PRs/Issues') do |v|
+      options[:top_n_oldest] = parse_value_or_percentage(v)
+    end
+
+    opts.on('--top-n-time-to-close N', String, 'Top N or N% PRs/Issues by time to close') do |v|
+      options[:top_n_time_to_close] = parse_value_or_percentage(v)
+    end
+
+    opts.on('--top-n-most-broken-ci-days N', String, 'Top N or N% CI jobs by broken days') do |v|
+      options[:top_n_most_broken_ci_days] = parse_value_or_percentage(v)
+    end
+
+    opts.on('--top-n-most-broken-ci-jobs N', String, 'Top N or N% CI jobs by number of failures') do |v|
+      options[:top_n_most_broken_ci_jobs] = parse_value_or_percentage(v)
+    end
+
+    opts.on('--top-n-stale-pr N', String, 'Top N or N% stale PRs (PR-specific)') do |v|
+      options[:top_n_stale_pr] = parse_value_or_percentage(v)
+    end
+
+    opts.on('--top-n-stale-issue N', String, 'Top N or N% stale Issues (Issue-specific)') do |v|
+      options[:top_n_stale_issue] = parse_value_or_percentage(v)
+    end
+
+    opts.on('--top-n-oldest-pr N', String, 'Top N or N% oldest PRs (PR-specific)') do |v|
+      options[:top_n_oldest_pr] = parse_value_or_percentage(v)
+    end
+
+    opts.on('--top-n-oldest-issue N', String, 'Top N or N% oldest Issues (Issue-specific)') do |v|
+      options[:top_n_oldest_issue] = parse_value_or_percentage(v)
+    end
+
+    opts.on('--top-n-time-to-close-pr N', String, 'Top N or N% PRs by time to close (PR-specific)') do |v|
+      options[:top_n_time_to_close_pr] = parse_value_or_percentage(v)
+    end
+
+    opts.on('--top-n-time-to-close-issue N', String, 'Top N or N% Issues by time to close (Issue-specific)') do |v|
+      options[:top_n_time_to_close_issue] = parse_value_or_percentage(v)
     end
   end.parse!
 
@@ -794,35 +848,185 @@ def main
   end
 
   # Process each configured repository
+  all_repo_stats = []
   repos_to_process.each do |settings|
     repo_full_name = "#{settings[:org]}/#{settings[:repo]}"
     repo_url = "https://github.com/#{repo_full_name}"
+
+    repo_data = {
+      name: repo_full_name,
+      url: repo_url,
+      settings: settings,
+      pr_issue_stats: nil,
+      ci_failures: nil
+    }
+
+    # Fetch PR and Issue stats if PR or Issue mode is active
+    if %w{pr issue}.any? { |m| mode.include?(m) }
+      repo_data[:pr_issue_stats] = get_pr_and_issue_stats(gh_client, settings)
+    end
+
+    # Fetch CI stats if CI mode is active
+    if mode.include?('ci')
+      repo_data[:ci_failures] = get_failed_tests_from_ci(
+        gh_client, bk_client, settings, bk_pipelines_by_repo
+      )
+    end
+    all_repo_stats << repo_data
+  end
+
+  filtered_repos = filter_repositories(all_repo_stats, config)
+
+  filtered_repos.each do |repo_data|
     if OssStats::Config::RepoStats.no_links
       log.info(
-        "\n* #{repo_full_name} Stats (Last #{settings[:days]} days) *",
+        "\n* #{repo_data[:name]} Stats (Last #{repo_data[:settings][:days]} days) *",
       )
     else
       log.info(
-        "\n*_[#{repo_full_name}](#{repo_url}) Stats " +
-        "(Last #{settings[:days]} days)_*",
+        "\n*_[#{repo_data[:name]}](#{repo_data[:url]}) Stats " +
+        "(Last #{repo_data[:settings][:days]} days)_*",
       )
     end
 
-    # Fetch and print PR and Issue stats if PR or Issue mode is active
-    if %w{pr issue}.any? { |m| mode.include?(m) }
-      stats = get_pr_and_issue_stats(gh_client, settings)
+    if repo_data[:pr_issue_stats]
       %w{PR Issue}.each do |type|
         next unless mode.include?(type.downcase)
-        print_pr_or_issue_stats(stats, type, config.include_list)
+        print_pr_or_issue_stats(repo_data[:pr_issue_stats], type, config.include_list)
       end
     end
 
-    next unless mode.include?('ci')
-    test_failures = get_failed_tests_from_ci(
-      gh_client, bk_client, settings, bk_pipelines_by_repo
-    )
-    print_ci_status(test_failures)
+    if repo_data[:ci_failures]
+      # Ensure CI mode was active for this data to be present and printed
+      next unless mode.include?('ci')
+      print_ci_status(repo_data[:ci_failures])
+    end
   end
+end
+
+
+# Placeholder for filter_repositories function
+# This will be implemented in the next step
+def filter_repositories(all_repo_stats, config)
+  log.debug("Filtering repositories based on config: #{config.to_h.select { |k, _| k.to_s.start_with?('top_n_') }}")
+  # If no filter options are set, return all stats
+  active_filters = %i[
+    top_n_stale top_n_oldest top_n_time_to_close
+    top_n_most_broken_ci_days top_n_most_broken_ci_jobs
+    top_n_stale_pr top_n_stale_issue
+    top_n_oldest_pr top_n_oldest_issue
+    top_n_time_to_close_pr top_n_time_to_close_issue
+  ].select { |opt| config[opt] }
+
+  return all_repo_stats if active_filters.empty?
+
+  selected_repos = Set.new
+  total_repos = all_repo_stats.size
+
+  # Helper to calculate N based on integer or percentage
+  calculate_n = lambda do |value|
+    if value.is_a?(Float) # Percentage
+      (value * total_repos).ceil
+    else # Integer
+      value
+    end
+  end
+
+  # --- Filter by top_n_stale ---
+  if config.top_n_stale
+    n = calculate_n.call(config.top_n_stale)
+    get_stale_count = ->(data) do
+      pr_stale = data.dig(:pr_issue_stats, :pr, :stale_count) || 0
+      issue_stale = data.dig(:pr_issue_stats, :issue, :stale_count) || 0
+      [pr_stale, issue_stale].max
+    end
+    all_repo_stats.sort_by { |data| -get_stale_count.call(data) }.first(n).each { |r| selected_repos.add(r) }
+  end
+
+  # --- Filter by top_n_oldest ---
+  if config.top_n_oldest
+    n = calculate_n.call(config.top_n_oldest)
+    get_oldest_days = ->(data) do
+      pr_days = data.dig(:pr_issue_stats, :pr, :oldest_open_days) || 0
+      issue_days = data.dig(:pr_issue_stats, :issue, :oldest_open_days) || 0
+      [pr_days, issue_days].max
+    end
+    all_repo_stats.sort_by { |data| -get_oldest_days.call(data) }.first(n).each { |r| selected_repos.add(r) }
+  end
+
+  # --- Filter by top_n_time_to_close ---
+  if config.top_n_time_to_close
+    n = calculate_n.call(config.top_n_time_to_close)
+    get_avg_close_time = ->(data) do
+        pr_avg = data.dig(:pr_issue_stats, :pr, :avg_time_to_close_hours) || 0
+        issue_avg = data.dig(:pr_issue_stats, :issue, :avg_time_to_close_hours) || 0
+        [pr_avg, issue_avg].max # Or sum(), depending on how this should be prioritized
+    end
+    all_repo_stats.sort_by { |data| -get_avg_close_time.call(data) }.first(n).each { |r| selected_repos.add(r) }
+  end
+
+  # --- Filter by top_n_most_broken_ci_days ---
+  if config.top_n_most_broken_ci_days
+    n = calculate_n.call(config.top_n_most_broken_ci_days)
+    get_broken_days = ->(data) do
+      data.dig(:ci_failures)&.values&.sum { |branches| branches&.values&.sum { |job| job[:dates]&.size || 0 } || 0 } || 0
+    end
+    all_repo_stats.sort_by { |data| -get_broken_days.call(data) }.first(n).each { |r| selected_repos.add(r) }
+  end
+
+  # --- Filter by top_n_most_broken_ci_jobs ---
+  if config.top_n_most_broken_ci_jobs
+    n = calculate_n.call(config.top_n_most_broken_ci_jobs)
+    get_broken_jobs_count = ->(data) do
+        data.dig(:ci_failures)&.values&.sum { |branches| branches&.keys&.size || 0 } || 0
+    end
+    all_repo_stats.sort_by { |data| -get_broken_jobs_count.call(data) }.first(n).each { |r| selected_repos.add(r) }
+  end
+
+  # --- Filter by top_n_stale_pr ---
+  if config.top_n_stale_pr
+    n = calculate_n.call(config.top_n_stale_pr)
+    get_stale_pr_count = ->(data) { data.dig(:pr_issue_stats, :pr, :stale_count) || 0 }
+    all_repo_stats.sort_by { |data| -get_stale_pr_count.call(data) }.first(n).each { |r| selected_repos.add(r) }
+  end
+
+  # --- Filter by top_n_stale_issue ---
+  if config.top_n_stale_issue
+    n = calculate_n.call(config.top_n_stale_issue)
+    get_stale_issue_count = ->(data) { data.dig(:pr_issue_stats, :issue, :stale_count) || 0 }
+    all_repo_stats.sort_by { |data| -get_stale_issue_count.call(data) }.first(n).each { |r| selected_repos.add(r) }
+  end
+
+  # --- Filter by top_n_oldest_pr ---
+  if config.top_n_oldest_pr
+    n = calculate_n.call(config.top_n_oldest_pr)
+    get_oldest_pr_days = ->(data) { data.dig(:pr_issue_stats, :pr, :oldest_open_days) || 0 }
+    all_repo_stats.sort_by { |data| -get_oldest_pr_days.call(data) }.first(n).each { |r| selected_repos.add(r) }
+  end
+
+  # --- Filter by top_n_oldest_issue ---
+  if config.top_n_oldest_issue
+    n = calculate_n.call(config.top_n_oldest_issue)
+    get_oldest_issue_days = ->(data) { data.dig(:pr_issue_stats, :issue, :oldest_open_days) || 0 }
+    all_repo_stats.sort_by { |data| -get_oldest_issue_days.call(data) }.first(n).each { |r| selected_repos.add(r) }
+  end
+
+  # --- Filter by top_n_time_to_close_pr ---
+  if config.top_n_time_to_close_pr
+    n = calculate_n.call(config.top_n_time_to_close_pr)
+    get_avg_close_time_pr = ->(data) { data.dig(:pr_issue_stats, :pr, :avg_time_to_close_hours) || 0 }
+    all_repo_stats.sort_by { |data| -get_avg_close_time_pr.call(data) }.first(n).each { |r| selected_repos.add(r) }
+  end
+
+  # --- Filter by top_n_time_to_close_issue ---
+  if config.top_n_time_to_close_issue
+    n = calculate_n.call(config.top_n_time_to_close_issue)
+    get_avg_close_time_issue = ->(data) { data.dig(:pr_issue_stats, :issue, :avg_time_to_close_hours) || 0 }
+    all_repo_stats.sort_by { |data| -get_avg_close_time_issue.call(data) }.first(n).each { |r| selected_repos.add(r) }
+  end
+
+  log.debug("Selected #{selected_repos.size} repos after filtering.")
+  selected_repos.to_a # Convert set to array before returning
 end
 
 main if __FILE__ == $PROGRAM_NAME

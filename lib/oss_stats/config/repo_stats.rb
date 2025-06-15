@@ -10,6 +10,17 @@ module OssStats
       # generally these should NOT be set, they override everything
       days nil
       branches nil
+      top_n_stale nil
+      top_n_oldest nil
+      top_n_time_to_close nil
+      top_n_most_broken_ci_days nil
+      top_n_most_broken_ci_jobs nil
+      top_n_stale_pr nil
+      top_n_stale_issue nil
+      top_n_oldest_pr nil
+      top_n_oldest_issue nil
+      top_n_time_to_close_pr nil
+      top_n_time_to_close_issue nil
 
       # set these instead
       default_branches ['main']
