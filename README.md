@@ -1,6 +1,7 @@
 # OSS Stats
 
 [![Lint](https://github.com/jaymzh/oss-stats/actions/workflows/lint.yml/badge.svg)](https://github.com/jaymzh/oss-stats/actions/workflows/lint.yml)
+[![Unittests](https://github.com/jaymzh/oss-stats/actions/workflows/unit.yml/badge.svg)](https://github.com/jaymzh/oss-stats/actions/workflows/unit.yml)
 [![DCO Check](https://github.com/jaymzh/oss-stats/actions/workflows/dco.yml/badge.svg)](https://github.com/jaymzh/oss-stats/actions/workflows/dco.yml)
 
 This is a collection of tools that aim to make it easier to track and report
