@@ -2,7 +2,7 @@ require 'rspec'
 require 'octokit'
 require 'base64'
 require_relative '../bin/repo_stats'
-require_relative '../lib/oss_stats/repo_stats_config'
+require_relative '../lib/oss_stats/config/repo_stats'
 require_relative '../lib/oss_stats/log'
 
 RSpec.describe 'repo_stats' do
@@ -28,23 +28,23 @@ RSpec.describe 'repo_stats' do
 
   describe '#rate_limited_sleep' do
     after(:each) do
-      OssStats::CiStatsConfig.limit_gh_ops_per_minute = nil
+      OssStats::Config::RepoStats.limit_gh_ops_per_minute = nil
     end
 
     it 'sleeps for the correct amount of time based on the rate limit' do
-      OssStats::CiStatsConfig.limit_gh_ops_per_minute = 60
+      OssStats::Config::RepoStats.limit_gh_ops_per_minute = 60
       expect(self).to receive(:sleep).with(1.0)
       rate_limited_sleep
     end
 
     it 'does not sleep if the rate limit is not set' do
-      OssStats::CiStatsConfig.limit_gh_ops_per_minute = nil
+      OssStats::Config::RepoStats.limit_gh_ops_per_minute = nil
       expect(self).not_to receive(:sleep)
       rate_limited_sleep
     end
 
     it 'does not sleep if the rate limit is 0' do
-      OssStats::CiStatsConfig.limit_gh_ops_per_minute = 0
+      OssStats::Config::RepoStats.limit_gh_ops_per_minute = 0
       expect(self).not_to receive(:sleep)
       rate_limited_sleep
     end
@@ -127,7 +127,7 @@ RSpec.describe 'repo_stats' do
                ]),
       )
 
-      failed_tests = get_failed_tests_from_ci(client, options)
+      failed_tests = get_failed_tests_from_ci(client, nil, options, {})
 
       expect(failed_tests['main']['Test Workflow / Test Job'])
         .to include(Date.today - 5)
@@ -143,7 +143,7 @@ RSpec.describe 'repo_stats' do
         double(workflow_runs: []),
       )
 
-      failed_tests = get_failed_tests_from_ci(client, options)
+      failed_tests = get_failed_tests_from_ci(client, nil, options, {})
 
       expect(failed_tests['main']).to be_empty
     end
@@ -183,10 +183,6 @@ RSpec.describe 'repo_stats' do
       end
 
       before do
-        allow(self).to receive(:get_buildkite_token!)
-          .with(OssStats::CiStatsConfig).and_return('fake-bk-token')
-        allow(OssStats::BuildkiteClient).to receive(:new)
-          .and_return(mock_buildkite_client)
         allow(mock_buildkite_client).to receive(:get_pipeline_builds)
           .and_return([])
       end
@@ -202,15 +198,13 @@ RSpec.describe 'repo_stats' do
         end
 
         it 'calls BuildkiteClient with correct slugs and processes results' do
-          expect(OssStats::BuildkiteClient).to receive(:new)
-            .with('fake-bk-token', 'test-buildkite-org')
-            .and_return(mock_buildkite_client)
           expect(mock_buildkite_client).to receive(:get_pipeline_builds)
             .with(
+              'test-buildkite-org',
               'actual-pipeline-name',
-              nil,
               Date.today - options[:days],
               Date.today,
+              'main',
             )
             .and_return([
               {
@@ -219,8 +213,23 @@ RSpec.describe 'repo_stats' do
                 },
               },
             ])
+          expect(mock_buildkite_client).to receive(:get_pipeline_builds)
+            .with(
+              'other-org',
+              'other-pipeline',
+              Date.today - options[:days],
+              Date.today,
+              'main',
+            )
+            .and_return([
+              {
+                'node' => {
+                  'createdAt' => (Date.today - 1).to_s, 'state' => 'PASSED'
+                },
+              },
+            ])
           failed_tests = get_failed_tests_from_ci(
-            client, settings_with_buildkite_token
+            client, mock_buildkite_client, settings_with_buildkite_token, {}
           )
           job1_key = '[BK] test-buildkite-org/actual-pipeline-name'
           expect(failed_tests['main'][job1_key]).to include(Date.today - 1)
@@ -232,18 +241,18 @@ RSpec.describe 'repo_stats' do
             .and_return(
               double(content: readme_content_with_badge_alternative_format),
             )
-          expect(OssStats::BuildkiteClient).to receive(:new)
-            .with('fake-bk-token', 'test-buildkite-org')
-            .and_return(mock_buildkite_client)
           expect(mock_buildkite_client).to receive(:get_pipeline_builds)
             .with(
+              'test-buildkite-org',
               'another-actual-pipeline',
-              nil,
               Date.today - options[:days],
               Date.today,
+              'main',
             )
             .and_return([])
-          get_failed_tests_from_ci(client, settings_with_buildkite_token)
+          get_failed_tests_from_ci(
+            client, mock_buildkite_client, settings_with_buildkite_token, {}
+          )
         end
 
         it 'handles no failed builds from Buildkite' do
@@ -253,20 +262,11 @@ RSpec.describe 'repo_stats' do
                 'node' => {
                   'createdAt' => (Date.today - 1).to_s,
                   'state' => 'PASSED',
-                  'jobs' => {
-                    'edges' => [
-                      {
-                        'node' => {
-                          'label' => 'Test Job 1', 'state' => 'PASSED'
-                        },
-                      },
-                    ],
-                  },
                 },
               },
             ])
           failed_tests = get_failed_tests_from_ci(
-            client, settings_with_buildkite_token
+            client, mock_buildkite_client, settings_with_buildkite_token, {}
           )
           buildkite_job_keys = failed_tests['main'].keys.select do |k|
             k.start_with?('Buildkite /')
@@ -278,8 +278,9 @@ RSpec.describe 'repo_stats' do
           let(:days_to_check) { 5 }
           let(:options_for_ongoing) { options.merge(days: days_to_check) }
           let(:today) { Date.today }
+          let(:org_name) { 'test-buildkite-org' }
           let(:pipeline_name) { 'actual-pipeline-name' }
-          let(:job_key) { "[BK] test-buildkite-org/#{pipeline_name}" }
+          let(:job_key) { "[BK] #{org_name}/#{pipeline_name}" }
 
           let(:mock_builds_for_ongoing_test) do
             # Helper to create a build node
@@ -302,10 +303,14 @@ RSpec.describe 'repo_stats' do
 
           it 'correctly reports days for ongoing and fixed failures' do
             allow(mock_buildkite_client).to receive(:get_pipeline_builds)
-              .with(pipeline_name, nil, today - days_to_check, today)
+              .with(
+                org_name, pipeline_name, today - days_to_check, today, 'main'
+              )
               .and_return(mock_builds_for_ongoing_test)
 
-            failed_tests = get_failed_tests_from_ci(client, options_for_ongoing)
+            failed_tests = get_failed_tests_from_ci(
+              client, mock_buildkite_client, options_for_ongoing, {}
+            )
 
             expected_job_dates = Set.new([
               today - days_to_check + 1,
@@ -332,7 +337,9 @@ RSpec.describe 'repo_stats' do
         it 'does not call BuildkiteClient' do
           expect(OssStats::BuildkiteClient).not_to receive(:new)
           expect(mock_buildkite_client).not_to receive(:get_pipeline_builds)
-          get_failed_tests_from_ci(client, settings_with_buildkite_token)
+          get_failed_tests_from_ci(
+            client, mock_buildkite_client, settings_with_buildkite_token, {}
+          )
         end
       end
 
@@ -344,7 +351,9 @@ RSpec.describe 'repo_stats' do
           expect(OssStats::BuildkiteClient).not_to receive(:new)
           expect(OssStats::Log).to receive(:warn)
             .with(%r{README.md not found for repo test_org/test_repo})
-          get_failed_tests_from_ci(client, settings_with_buildkite_token)
+          get_failed_tests_from_ci(
+            client, mock_buildkite_client, settings_with_buildkite_token, {}
+          )
         end
       end
 
@@ -362,7 +371,7 @@ RSpec.describe 'repo_stats' do
           expect(OssStats::Log).to receive(:error)
             .with(/Error during Buildkite integration for test_org/)
           failed_tests = get_failed_tests_from_ci(
-            client, settings_with_buildkite_token
+            client, mock_buildkite_client, settings_with_buildkite_token, {}
           )
           buildkite_job_keys = failed_tests['main'].keys.select do |k|
             k.start_with?('Buildkite /')
@@ -383,115 +392,233 @@ RSpec.describe 'repo_stats' do
       end
     end
   end
-end
 
-describe '#print_ci_status' do
-  context 'with only GitHub Actions failures' do
-    let(:test_failures) do
-      {
-        'main' => {
-          'GH Workflow / Job A' => Set[Date.today, Date.today - 1],
-          'GH Workflow / Job B' => Set[Date.today],
+  describe '#print_ci_status' do
+    context 'with only GitHub Actions failures' do
+      let(:test_failures) do
+        {
+          'main' => {
+            'GH Workflow / Job A' => Set[Date.today, Date.today - 1],
+            'GH Workflow / Job B' => Set[Date.today],
+          },
+        }
+      end
+
+      it 'prints GitHub Actions failures correctly' do
+        expect(OssStats::Log).to receive(:info)
+          .with("\n* CI Stats:")
+        expect(OssStats::Log).to receive(:info)
+          .with('    * Branch: `main` has the following failures:')
+        expect(OssStats::Log).to receive(:info)
+          .with('        * GH Workflow / Job A: 2 days')
+        expect(OssStats::Log).to receive(:info)
+          .with('        * GH Workflow / Job B: 1 days')
+        print_ci_status(test_failures)
+      end
+    end
+
+    context 'with only Buildkite failures' do
+      let(:test_failures) do
+        {
+          'main' => {
+            '[BK] org/pipe1' => Set[Date.today],
+            '[BK] org/pipe2' => Set[Date.today, Date.today - 1, Date.today - 2],
+          },
+        }
+      end
+
+      it 'prints Buildkite failures correctly' do
+        expect(OssStats::Log).to receive(:info)
+          .with("\n* CI Stats:")
+        expect(OssStats::Log).to receive(:info)
+          .with('    * Branch: `main` has the following failures:')
+        expect(OssStats::Log).to receive(:info)
+          .with('        * [BK] org/pipe1: 1 days')
+        expect(OssStats::Log).to receive(:info)
+          .with('        * [BK] org/pipe2: 3 days')
+        print_ci_status(test_failures)
+      end
+    end
+
+    context 'with mixed GitHub Actions and Buildkite failures' do
+      let(:test_failures) do
+        {
+          'main' => {
+            'GH Workflow / Job A' => Set[Date.today],
+            'Buildkite / org/pipe / Job X' => Set[Date.today - 1],
+            'GH Workflow / Job C' => Set[Date.today - 2, Date.today - 3],
+          },
+        }
+      end
+
+      it 'prints mixed failures correctly and sorted' do
+        expect(OssStats::Log).to receive(:info)
+          .with("\n* CI Stats:")
+        expect(OssStats::Log).to receive(:info)
+          .with('    * Branch: `main` has the following failures:')
+        # Sorted order: Buildkite job first, then GH jobs
+        expect(OssStats::Log).to receive(:info)
+          .with('        * Buildkite / org/pipe / Job X: 1 days').ordered
+        expect(OssStats::Log).to receive(:info)
+          .with('        * GH Workflow / Job A: 1 days').ordered
+        expect(OssStats::Log).to receive(:info)
+          .with('        * GH Workflow / Job C: 2 days').ordered
+        print_ci_status(test_failures)
+      end
+    end
+
+    context 'with no failures' do
+      let(:test_failures) { { 'main' => {} } }
+
+      it 'prints the no failures message' do
+        expect(OssStats::Log).to receive(:info)
+          .with("\n* CI Stats:")
+        expect(OssStats::Log).to receive(:info)
+          .with('    * Branch: `main`: No job failures found! :tada:')
+        print_ci_status(test_failures)
+      end
+    end
+
+    context 'with failures on multiple branches' do
+      let(:test_failures) do
+        {
+          'main' => { 'GH Workflow / Job A' => Set[Date.today] },
+          'develop' => { '[BK] org/pipe' => Set[Date.today - 1,
+Date.today - 2] },
+        }
+      end
+
+      it 'groups failures by branch and prints them correctly' do
+        expect(OssStats::Log).to receive(:info)
+          .with("\n* CI Stats:")
+        expect(OssStats::Log).to receive(:info)
+          .with('    * Branch: `develop` has the following failures:')
+        expect(OssStats::Log).to receive(:info)
+          .with('        * [BK] org/pipe: 2 days')
+        expect(OssStats::Log).to receive(:info)
+          .with('    * Branch: `main` has the following failures:')
+        expect(OssStats::Log).to receive(:info)
+          .with('        * GH Workflow / Job A: 1 days')
+
+        print_ci_status(test_failures)
+      end
+    end
+  end
+
+  describe '#determine_orgs_to_process' do
+    before(:each) do
+      OssStats::Config::RepoStats.organizations({
+        'org1' => {
+          'days' => 2,
+          'repositories' => {
+            'repo1' => {},
+            'repo2' => {
+              'days' => 3,
+            },
+          },
         },
-      }
-    end
-
-    it 'prints GitHub Actions failures correctly' do
-      expect(OssStats::Log).to receive(:info)
-        .with("\n* CI Stats:")
-      expect(OssStats::Log).to receive(:info)
-        .with('    * Branch: `main` has the following failures:')
-      expect(OssStats::Log).to receive(:info)
-        .with('        * GH Workflow / Job A: 2 days')
-      expect(OssStats::Log).to receive(:info)
-        .with('        * GH Workflow / Job B: 1 days')
-      print_ci_status(test_failures)
-    end
-  end
-
-  context 'with only Buildkite failures' do
-    let(:test_failures) do
-      {
-        'main' => {
-          '[BK] org/pipe1' => Set[Date.today],
-          '[BK] org/pipe2' => Set[Date.today, Date.today - 1, Date.today - 2],
+        'org2' => {
+          'days' => 7,
+          'repositories' => {
+            'repoA' => {
+              'days' => 30,
+            },
+            'repoB' => {},
+          },
         },
-      }
+      })
     end
+    let(:config) { OssStats::Config::RepoStats }
 
-    it 'prints Buildkite failures correctly' do
-      expect(OssStats::Log).to receive(:info)
-        .with("\n* CI Stats:")
-      expect(OssStats::Log).to receive(:info)
-        .with('    * Branch: `main` has the following failures:')
-      expect(OssStats::Log).to receive(:info)
-        .with('        * [BK] org/pipe1: 1 days')
-      expect(OssStats::Log).to receive(:info)
-        .with('        * [BK] org/pipe2: 3 days')
-      print_ci_status(test_failures)
-    end
-  end
+    context 'combines org/repo limits properly' do
+      it 'returns the config orgs when no limits specified' do
+        ans = config.organizations.dup
+        expect(determine_orgs_to_process).to eq(ans)
+      end
 
-  context 'with mixed GitHub Actions and Buildkite failures' do
-    let(:test_failures) do
-      {
-        'main' => {
-          'GH Workflow / Job A' => Set[Date.today],
-          'Buildkite / org/pipe / Job X' => Set[Date.today - 1],
-          'GH Workflow / Job C' => Set[Date.today - 2, Date.today - 3],
-        },
-      }
-    end
+      it 'returns only the specified org when requested' do
+        ans = { 'org2' => config.organizations['org2'].dup }
+        config.github_org = 'org2'
+        expect(determine_orgs_to_process).to eq(ans)
+      end
 
-    it 'prints mixed failures correctly and sorted' do
-      expect(OssStats::Log).to receive(:info)
-        .with("\n* CI Stats:")
-      expect(OssStats::Log).to receive(:info)
-        .with('    * Branch: `main` has the following failures:')
-      # Sorted order: Buildkite job first, then GH jobs
-      expect(OssStats::Log).to receive(:info)
-        .with('        * Buildkite / org/pipe / Job X: 1 days').ordered
-      expect(OssStats::Log).to receive(:info)
-        .with('        * GH Workflow / Job A: 1 days').ordered
-      expect(OssStats::Log).to receive(:info)
-        .with('        * GH Workflow / Job C: 2 days').ordered
-      print_ci_status(test_failures)
+      it 'returns only the specified org/repo when requested' do
+        ans = { 'org2' => config.organizations['org2'].dup }
+        ans['org2']['repositories'].delete('repoA')
+        config.github_org = 'org2'
+        config.github_repo = 'repoB'
+        expect(determine_orgs_to_process).to eq(ans)
+      end
+
+      it 'creates an appropriate entry when none exists' do
+        ans = { 'neworg' => { 'repositories' => { 'repo' => {} } } }
+        config.github_org = 'neworg'
+        config.github_repo = 'repo'
+        expect(determine_orgs_to_process).to eq(ans)
+      end
     end
   end
 
-  context 'with no failures' do
-    let(:test_failures) { { 'main' => {} } }
-
-    it 'prints the no failures message' do
-      expect(OssStats::Log).to receive(:info)
-        .with("\n* CI Stats:")
-      expect(OssStats::Log).to receive(:info)
-        .with('    * Branch: `main`: No job failures found! :tada:')
-      print_ci_status(test_failures)
+  describe '#get_effective_repo_settings' do
+    before(:each) do
+      OssStats::Config::RepoStats.days = nil
+      OssStats::Config::RepoStats.default_days = 15
+      OssStats::Config::RepoStats.default_branches = ['foo']
     end
-  end
+    context 'with no org or repo overrides' do
+      it 'uses defaults properly' do
+        ans = {
+          org: 'org1', repo: 'repo1', days: 15, branches: ['foo']
+        }
+        expect(get_effective_repo_settings('org1', 'repo1', {}, {})).to eq(ans)
+      end
 
-  context 'with failures on multiple branches' do
-    let(:test_failures) do
-      {
-        'main' => { 'GH Workflow / Job A' => Set[Date.today] },
-        'develop' => { '[BK] org/pipe' => Set[Date.today - 1, Date.today - 2] },
-      }
+      it 'uses CLI days override properly' do
+        OssStats::Config::RepoStats.days = 2
+        ans = {
+          org: 'org1', repo: 'repo1', days: 2, branches: ['foo']
+        }
+        expect(get_effective_repo_settings('org1', 'repo1', {}, {})).to eq(ans)
+      end
     end
 
-    it 'groups failures by branch and prints them correctly' do
-      expect(OssStats::Log).to receive(:info)
-        .with("\n* CI Stats:")
-      expect(OssStats::Log).to receive(:info)
-        .with('    * Branch: `develop` has the following failures:')
-      expect(OssStats::Log).to receive(:info)
-        .with('        * [BK] org/pipe: 2 days')
-      expect(OssStats::Log).to receive(:info)
-        .with('    * Branch: `main` has the following failures:')
-      expect(OssStats::Log).to receive(:info)
-        .with('        * GH Workflow / Job A: 1 days')
+    context 'with org and repo overrides' do
+      it 'overrides default with org settings' do
+        s = get_effective_repo_settings(
+          'org1',
+          'repo1',
+          { 'days' => 77 },
+          {},
+        )
+        expect(s[:days]).to eq(77)
+      end
 
-      print_ci_status(test_failures)
+      it 'overrides default and org with repo settings' do
+        s = get_effective_repo_settings(
+          'org1',
+          'repo1',
+          { 'days' => 77, 'branches' => ['release'] },
+          { 'days' => 99 },
+        )
+        # days comes from repo settings
+        expect(s[:days]).to eq(99)
+        # most specific branches setting is from org
+        expect(s[:branches]).to eq(['release'])
+      end
+
+      it 'overrides default org and repo with cli days settings' do
+        OssStats::Config::RepoStats.days = 11
+        s = get_effective_repo_settings(
+          'org1',
+          'repo1',
+          { 'days' => 77, 'branches' => ['release'] },
+          { 'days' => 99, 'branches' => ['special'] },
+        )
+        # days comes from CLI override
+        expect(s[:days]).to eq(11)
+        # most specific branches setting is from repo
+        expect(s[:branches]).to eq(['special'])
+      end
     end
   end
 end

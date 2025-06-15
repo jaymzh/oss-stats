@@ -80,4 +80,4 @@ make a configuration file if you don't want to have to run `repo_stats`
 repeatedly. It allows you to specify orgs, repos within those orgs, and
 customize branches to check and days to report on by repo.
 
-See [examples/ci_stats_config.rb](../examples/ci_stats_config.rb) for details.
+See [examples/repo_stats_config.rb](../examples/repo_stats_config.rb) for details.

@@ -500,108 +500,90 @@ def parse_options # rubocop:disable Metrics/MethodLength, Metrics/AbcSize
       '--branches BRANCHES',
       Array,
       'Comma-separated list of branches',
-    ) do |v|
-      options[:default_branches] = v
-    end
+    ) { |v| options[:default_branches] = v }
 
     opts.on(
       '--buildkite-token TOKEN',
       String,
       'Buildkite API token',
-    ) do |v|
-      options[:buildkite_token] = v
-    end
+    ) { |v| options[:buildkite_token] = v }
 
     opts.on(
       '--buildkite-org ORG',
       String,
       'Buildkite org to find pipelines in. If specified any pipeline in that' +
-      ' org associated with any repos we report on will be included.',
-    ) do |v|
-      options[:buildkite_org] = v
-    end
+        ' org associated with any repos we report on will be included.',
+    ) { |v| options[:buildkite_org] = v }
 
     opts.on(
       '-c FILE',
       '--config FILE_PATH',
       String,
-      'Config file to load. [default: will look for `ci_stats_config.rb` ' +
-      'in `./`, `~/.config/oss_stats`, and `/etc`]',
-    ) do |c|
-      options[:config] = c
-    end
+      'Config file to load. [default: will look for `repo_stats_config.rb`' +
+        ' in `./`, `~/.config/oss_stats`, and `/etc`]',
+    ) { |c| options[:config] = c }
 
     opts.on(
       '-d DAYS',
       '--days DAYS',
       Integer,
-      'Number of days to analyze',
-    ) do |v|
-      options[:default_days] = v
-    end
+      'Number of days to analyze. Overrides specific org or repo configs',
+    ) { |v| options[:days] = v }
+
+    opts.on(
+      '-D DAYS',
+      '--default-days DAYS',
+      Integer,
+      'Default number of days to analyze. Will be overriden by specific org' +
+        ' or repo configs',
+    ) { |v| options[:default_days] = v }
 
     opts.on(
       '--ci-timeout TIMEOUT',
       Integer,
       'Timeout for CI processing in seconds',
-    ) do |v|
-      options[:ci_timeout] = v
-    end
+    ) { |v| options[:ci_timeout] = v }
 
     opts.on(
       '--github-api-endpoint ENDPOINT',
       String,
       'GitHub API endpoint',
-    ) do |v|
-      options[:github_api_endpoint] = v
-    end
+    ) { |v| options[:github_api_endpoint] = v }
 
     opts.on(
       '--github-org ORG_NAME',
       String,
       'GitHub organization name',
-    ) do |v|
-      options[:github_org] = v
-    end
+    ) { |v| options[:github_org] = v }
 
     opts.on(
       '--github-repo REPO_NAME',
       String,
       'GitHub repository name',
-    ) do |v|
-      options[:github_repo] = v
-    end
+    ) { |v| options[:github_repo] = v }
 
     opts.on(
       '--github-token TOKEN',
       'GitHub personal access token',
-    ) do |v|
-      options[:gh_token] = v
-    end
+    ) { |v| options[:gh_token] = v }
 
     opts.on(
       '--include-list',
       'Include list of relevant PRs/Issues (default: false)',
-    ) do
-      options[:include_list] = true
-    end
+    ) { options[:include_list] = true }
 
     opts.on(
       '--limit-gh-ops-per-minute RATE',
       Float,
       'Rate limit GitHub API operations to this number per minute',
-    ) do |v|
-      options[:limit_gh_ops_per_minute] = v
-    end
+    ) { |v| options[:limit_gh_ops_per_minute] = v }
 
     opts.on(
       '-l LEVEL',
       '--log-level LEVEL',
       %i{trace debug info warn error fatal},
       'Set logging level to LEVEL. [default: info]',
-    ) do |level|
-      options[:log_level] = level
-    end
+    ) { |level| options[:log_level] = level }
 
     opts.on(
       '--mode MODE',
@@ -641,26 +623,72 @@ def parse_options # rubocop:disable Metrics/MethodLength, Metrics/AbcSize
   # Set final log level from potentially merged config
   log.level = config.log_level
 
-  # Handle org/repo specified via CLI: overrides any config file orgs/repos.
-  if options[:github_org] && options[:github_repo]
-    log.debug('Using organization and repository from command line arguments.')
-    # Fetch existing repo config to preserve specific settings if any,
-    # otherwise, it will be an empty hash.
-    org_settings = config.organizations.fetch(options[:github_org], {})
-    repo_settings =
-      org_settings.fetch('repositories', {}).fetch(options[:github_repo], {})
-
-    config.organizations = {
-      options[:github_org] => {
-        'repositories' => { options[:github_repo] => repo_settings },
-      },
-    }
-  elsif options[:github_org] || options[:github_repo]
-    log.fatal(
-      'Error: None or both of --github-org and --github-repo must be specified',
-    )
-    exit 1
+  if config.github_repo && !config.github_org
+    raise ArgumentError, '--github-repo requires --github-org'
   end
+end
+
+# Construct effective settings for a repository by merging global, org-level,
+# and repo-level configurations.
+def get_effective_repo_settings(org, repo, org_conf = {}, repo_conf = {})
+  effective = { org:, repo: }
+  config = OssStats::Config::RepoStats
+
+  # we allow somone to override days for the entire run (config.days) which
+  # is different from the fallback (config.default_days)
+  effective[:days] = config.days || repo_conf['days'] ||
+                     org_conf['days'] || config.default_days
+  branches_setting = repo_conf['branches'] ||
+                     org_conf['branches'] || config.default_branches
+  effective[:branches] =
+    if branches_setting.is_a?(String)
+      branches_setting.split(',').map(&:strip)
+    else
+      Array(branches_setting).map(&:strip)
+    end
+  effective
+end
+
+def determine_orgs_to_process
+  relevant_orgs = {}
+  # Handle org/repo specified via CLI: overrides any config file orgs/repos.
+  if config.github_org || config.github_repo
+    # we already validated that if repo is set, so is org, so we can assume
+    # org is set...
+    if config.organizations[config.github_org]
+      log.debug("Limiting config to #{config.github_org} org")
+      relevant_orgs[config.github_org] =
+        config.organizations[config.github_org].dup
+    else
+      log.debug(
+        "Initialzing config structure for #{config.github_org} org requested" +
+        ' on the command line, but not in config.',
+      )
+      relevant_orgs[config.github_org] = { 'repositories' => {} }
+    end
+
+    if config.github_repo
+      if relevant_orgs[config.github_org]['repositories'][config.github_repo]
+        log.debug("Limiting config to #{config.github_repo} repo")
+        relevant_repo = relevant_orgs[config.github_org][
+          'repositories'][config.github_repo]
+        relevant_orgs[config.github_org]['repositories'] = {
+          config.github_repo => relevant_repo,
+        }
+      else
+        log.debug(
+          "Initializing config structure for #{config.github_repo} repo" +
+          ' requested on the command line, but not in config',
+        )
+        relevant_orgs[config.github_org]['repositories'] = {
+          config.github_repo => {},
+        }
+      end
+    end
+  else
+    relevant_orgs = config.organizations
+  end
+  relevant_orgs
 end
 
 def main
@@ -668,6 +696,15 @@ def main
   config = OssStats::Config::RepoStats
   mode = config.mode
   mode = %w{ci pr issue} if mode.include?('all')
+
+  organizations_to_process = determine_orgs_to_process
+
+  # Prepare list of repositories to process based on configuration
+  repos_to_process = []
+  if organizations_to_process.empty?
+    log.warn('No organizations or repositories configured to process. Exiting.')
+    exit 0
+  end
 
   # get tokens early so we fail if we're missing them
   gh_token = get_github_token!(config)
@@ -682,39 +719,12 @@ def main
     bk_pipelines_by_repo = bk_client.pipelines_by_repo(config.buildkite_org)
   end
 
-  # Lambda to construct effective settings for a repository by merging
-  # global, org-level, and repo-level configurations.
-  get_effective_repo_settings =
-    lambda do |org, repo_name, org_conf = {}, repo_conf = {}|
-      effective = { org:, repo: repo_name }
-      effective[:days] = repo_conf['days'] ||
-                         org_conf['default_days'] ||
-                         config.default_days
-      branches_setting = repo_conf['branches'] ||
-                         org_conf['default_branches'] ||
-                         config.default_branches
-      effective[:branches] = if branches_setting.is_a?(String)
-                               branches_setting.split(',').map(&:strip)
-                             else
-                               Array(branches_setting).map(&:strip)
-                             end
-      effective
-    end
-
-  # Prepare list of repositories to process based on configuration
-  repos_to_process = []
-  if config.organizations.nil? ||
-     config.organizations.empty?
-    log.warn('No organizations or repositories configured to process. Exiting.')
-    exit 0
-  end
-
   config.organizations.each do |org_name, org_level_config|
     log.debug("Processing configuration for organization: #{org_name}")
     repos = org_level_config['repositories'] || {}
     repos.each do |repo_name, repo_level_config|
       log.debug("Processing configuration for repository: #{repo_name}")
-      repos_to_process << get_effective_repo_settings.call(
+      repos_to_process << get_effective_repo_settings(
         org_name, repo_name, org_level_config, repo_level_config
       )
     end
