@@ -1,11 +1,11 @@
-require_relative '../src/lib/oss_stats/buildkite_client'
-require_relative '../src/lib/oss_stats/log'
+require_relative '../lib/oss_stats/buildkite_client'
+require_relative '../lib/oss_stats/log'
 require 'date'
 
 RSpec.describe OssStats::BuildkiteClient do
   let(:token) { 'test-token' }
   let(:organization_slug) { 'test-org' }
-  let(:client) { described_class.new(token, organization_slug) }
+  let(:client) { described_class.new(token) }
 
   describe '#get_pipeline_builds' do
     let(:pipeline_slug) { 'test-pipeline' }
@@ -49,7 +49,7 @@ RSpec.describe OssStats::BuildkiteClient do
 
       it 'returns a list of builds with their job statuses' do
         builds = client.get_pipeline_builds(
-          pipeline_slug, pull_request_id, from_date, to_date
+          organization_slug, pipeline_slug, from_date, to_date
         )
 
         expect(builds.size).to eq(2)
@@ -98,7 +98,7 @@ RSpec.describe OssStats::BuildkiteClient do
 
       it 'fetches all builds across pages' do
         builds = client.get_pipeline_builds(
-          pipeline_slug, pull_request_id, from_date, to_date
+          organization_slug, pipeline_slug, from_date, to_date
         )
         expect(builds.size).to eq(2)
         expect(builds[0]['node']['state']).to eq('PASSED')
@@ -108,7 +108,7 @@ RSpec.describe OssStats::BuildkiteClient do
       it 'makes two API calls' do
         expect(client).to receive(:execute_graphql_query).twice
         client.get_pipeline_builds(
-          pipeline_slug, pull_request_id, from_date, to_date
+          organization_slug, pipeline_slug, from_date, to_date
         )
       end
     end
@@ -122,18 +122,18 @@ RSpec.describe OssStats::BuildkiteClient do
 
       it 'returns an empty array' do
         builds = client.get_pipeline_builds(
-          pipeline_slug, pull_request_id, from_date, to_date
+          organization_slug, pipeline_slug, from_date, to_date
         )
         expect(builds).to be_empty
       end
 
       it 'logs the error' do
         expected_log_message =
-          %r{Error in get_pipeline_builds for slug test-org/test-pipeline}
+          %r{Error in get_pipeline_builds for test-org/test-pipeline}
         expect(OssStats::Log).to receive_message_chain(:error)
           .with(expected_log_message)
         client.get_pipeline_builds(
-          pipeline_slug, pull_request_id, from_date, to_date
+          organization_slug, pipeline_slug, from_date, to_date
         )
       end
     end
@@ -162,7 +162,7 @@ RSpec.describe OssStats::BuildkiteClient do
 
       it 'returns an empty array' do
         builds = client.get_pipeline_builds(
-          pipeline_slug, pull_request_id, from_date, to_date
+          organization_slug, pipeline_slug, from_date, to_date
         )
         expect(builds).to be_empty
       end

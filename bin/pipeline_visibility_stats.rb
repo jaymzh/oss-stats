@@ -1,20 +1,20 @@
 #!/usr/bin/env ruby
 
-require 'net/http'
-require 'json'
-require 'yaml'
 require 'base64'
-require 'uri'
-require 'optparse'
 require 'fileutils'
+require 'json'
 require 'mixlib/shellout'
+require 'net/http'
+require 'optparse'
 require 'set'
+require 'uri'
+require 'yaml'
 
-require_relative 'lib/oss_stats/github_token'
-require_relative 'lib/oss_stats/github_client'
-require_relative 'lib/oss_stats/buildkite_token'
-require_relative 'lib/oss_stats/buildkite_client'
-require_relative 'lib/oss_stats/log'
+require_relative '../lib/oss_stats/buildkite_client'
+require_relative '../lib/oss_stats/buildkite_token'
+require_relative '../lib/oss_stats/github_client'
+require_relative '../lib/oss_stats/github_token'
+require_relative '../lib/oss_stats/log'
 
 def get_expeditor_config(org, repo, client)
   path = "/repos/#{org}/#{repo}/contents/.expeditor/config.yml"
@@ -77,14 +77,14 @@ def output(fh, msg)
   end
 end
 
-def process_expeditor_pipelines(repo_info, options, github_client, log)
+def process_expeditor_pipelines(repo_info, options, gh_client, log)
   total_pipeline_count = 0
   private_pipeline_count = 0
   skipped_by_pattern = Hash.new(0)
 
   # Assuming repo_info is already fetched and confirmed public
   repo = repo_info['name'] # Get repo name from repo_info
-  content = get_expeditor_config(options[:github_org], repo, github_client)
+  content = get_expeditor_config(options[:github_org], repo, gh_client)
   unless content
     log.debug("No expeditor config for #{repo}")
     return { pipelines: [], total_processed: 0, private_found: 0,
@@ -204,10 +204,9 @@ end
 def process_buildkite_pipelines(
   repo_info,
   options,
-  github_client,
-  buildkite_token,
+  gh_client,
   log,
-  buildkite_clients_by_org,
+  bk_client,
   buildkite_slug_visibility_lookup,
   primary_org_pipelines_map_data
 )
@@ -265,13 +264,13 @@ def process_buildkite_pipelines(
   # However, more likely, we don't have access to see the pipeline or
   # even the BK org. So walk the most recent PRs
   log.debug("Starting BK PR analysis for #{repo_name} (URL: #{repo_url})")
-  recent_prs = github_client.recent_prs(options[:github_org], repo_name)
+  recent_prs = gh_client.recent_prs(options[:github_org], repo_name)
   recent_prs.reject! { |pr| pr['draft'] }
   recent_prs.each do |pr_data|
     pr_number = pr_data['number']
 
     log.debug("Analyzing PR ##{pr_number}")
-    statuses = github_client.pr_statuses(pr_data)
+    statuses = gh_client.pr_statuses(pr_data)
 
     next if statuses.empty?
 
@@ -309,11 +308,7 @@ def process_buildkite_pipelines(
       visibility = nil
       discovery_method = ''
 
-      # determine the client to use, and if we already have
-      # visibility, grab that too
-      client_to_use = nil
       if bk_org == options[:buildkite_org]
-        client_to_use = buildkite_clients_by_org[options[:buildkite_org]]
         details_from_lookup = buildkite_slug_visibility_lookup[bk_slug]
         if details_from_lookup
           # It was in our initial scan of all pipelines, but was not
@@ -326,46 +321,29 @@ def process_buildkite_pipelines(
           )
           visibility = details_from_lookup[:visibility]
           discovery_method = 'from initial scan'
-        else
-          discovery_method = 'queried directly'
-        end
-      else
-        discovery_method = 'queried directly (secondary org)'
-        log.debug("Pipeline from different org: #{bk_org}. Ensuring client.")
-        client_to_use = buildkite_clients_by_org.fetch(bk_org) do |org_key|
-          buildkite_clients_by_org[org_key] = OssStats::BuildkiteClient.new(
-            buildkite_token, org_key
-          )
         end
       end
 
-      # if we don't have visibility, determine it
-      if visibility.nil? && client_to_use
-        log.trace("Querying API for pipeline #{bk_org}/#{bk_slug}")
-        pipeline_data = client_to_use.get_pipeline(bk_slug)
+      unless visibility
+        pipeline_data = bk_client.get_pipeline(bk_org, bk_slug)
+        discovery_method = 'queried directly'
         visibility = pipeline_data&.dig('visibility')
-        discovery_method = 'queried directly' if discovery_method.empty?
-      elsif visibility.nil? && client_to_use.nil? &&
-            bk_org == options[:buildkite_org]
-        log.error('Failed to get client for primary org ' \
-                  "#{options[:buildkite_org]} to query #{bk_slug}")
-        discovery_method = 'client error'
       end
+
+      next if visibility&.downcase == 'public'
 
       source_info = "(via PR ##{pr_number}"
       source_info += ", Org: #{bk_org}" if bk_org != options[:buildkite_org]
       source_info += ", #{discovery_method})"
 
-      if visibility.nil? || visibility.downcase != 'public'
-        if reported_slugs.add?(report_key) # Use reported_slugs
-          repo_missing_public << report_key
-          log.debug("#{report_key} source info: #{source_info}")
-          private_pipeline_count += 1
-        else
-          log.debug(
-            "Pipeline #{report_key} (via PR) already reported as private.",
-          )
-        end
+      if reported_slugs.add?(report_key)
+        repo_missing_public << report_key
+        log.debug("#{report_key} source info: #{source_info}")
+        private_pipeline_count += 1
+      else
+        log.debug(
+          "Pipeline #{report_key} (via PR) already reported as private.",
+        )
       end
     end
   end
@@ -385,18 +363,18 @@ def main(options)
   end
 
   github_token = get_github_token!(options)
-  github_client = OssStats::GitHubClient.new(github_token)
-  buildkite_clients_by_org = {}
+  gh_client = OssStats::GitHubClient.new(github_token)
+  bk_client = nil
   if options[:provider] == 'buildkite'
     unless options[:buildkite_org]
       raise ArgumentError, 'buildkite org required for buildkite provider'
     end
     buildkite_token = get_buildkite_token!(options)
-    buildkite_client = OssStats::BuildkiteClient.new(
-      buildkite_token, options[:buildkite_org]
-    )
+    bk_client = OssStats::BuildkiteClient.new(buildkite_token)
     log.debug('Fetching all Buildkite pipelines...')
-    buildkite_pipelines_data = buildkite_client.all_pipelines
+    buildkite_pipelines_data = bk_client.pipelines_by_repo(
+      options[:buildkite_org],
+    )
     bk_pipeline_count = buildkite_pipelines_data.values.flatten.count
     bk_repo_count = buildkite_pipelines_data.keys.count
     log.debug(
@@ -415,8 +393,6 @@ def main(options)
         }
       end
     end
-
-    buildkite_clients_by_org[options[:buildkite_org]] = buildkite_client
   elsif options[:provider] != 'expeditor'
     raise ArgumentError, "Unsupported provider: #{options[:provider]}"
   end
@@ -432,7 +408,7 @@ def main(options)
     log.debug("Fetching repos under '#{options[:github_org]}'...")
     page = 1
     loop do
-      list = github_client.get(
+      list = gh_client.get(
         "/orgs/#{options[:github_org]}/repos?per_page=100&page=#{page}",
       )
       break if list.empty?
@@ -450,18 +426,18 @@ def main(options)
     log.debug("Discovered these public repos: #{options[:repos].join(', ')}")
   end
 
-  options[:repos].each do |repo|
+  options[:repos].sort.each do |repo|
     next if options[:skip_repos].include?(repo)
 
     begin
-      repo_info = github_client.get("/repos/#{options[:github_org]}/#{repo}")
+      repo_info = gh_client.get("/repos/#{options[:github_org]}/#{repo}")
     rescue StandardError => e
       log.error(
         "Error fetching repo info for #{options[:github_org]}/#{repo}: " +
         e.message,
       )
       log.error('Skipping this repository.')
-      next # Skip to the next repo
+      next
     end
 
     if repo_info['private']
@@ -474,16 +450,15 @@ def main(options)
     result = {}
     if options[:provider] == 'expeditor'
       result = process_expeditor_pipelines(
-        repo_info, options, github_client, log
+        repo_info, options, gh_client, log
       )
     elsif options[:provider] == 'buildkite'
       result = process_buildkite_pipelines(
         repo_info,
         options,
-        github_client,
-        buildkite_token,
+        gh_client,
         log,
-        buildkite_clients_by_org,
+        bk_client,
         buildkite_slug_visibility_lookup,
         buildkite_pipelines_data,
       )

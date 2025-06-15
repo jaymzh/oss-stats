@@ -9,7 +9,7 @@ def get_buildkite_token!(config = OssStats::CiStatsConfig)
   unless token
     raise ArgumentError,
       'Buildkite token not found. Set via --buildkite-token CLI option, ' +
-      'in ci_stats_config.rb, or as BUILDKITE_API_TOKEN environment variable.'
+      'in the conifg, or as BUILDKITE_API_TOKEN environment variable.'
   end
   token
 end

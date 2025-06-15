@@ -4,8 +4,8 @@ require 'sqlite3'
 require 'optparse'
 require 'date'
 
-require_relative 'lib/oss_stats/log'
-require_relative 'lib/oss_stats/promises_config'
+require_relative '../lib/oss_stats/log'
+require_relative '../lib/oss_stats/config/promises'
 
 log.level = :info
 
@@ -175,7 +175,7 @@ def show_status(config, include_abandoned: false)
     label = "#{desc} (#{days} days ago)"
     label += " [ref: #{ref}]" unless ref.empty?
     label += " [#{status}]" if status == 'abandoned'
-    output(fh, "- #{label}")
+    output(fh, "* #{label}")
   end
 end
 
@@ -269,22 +269,21 @@ def main
     end
   end.parse!
   log.level = options[:log_level] if options[:log_level]
+  config = OssStats::Config::Promises
 
   if options[:config]
     expanded_config = File.expand_path(options[:config])
   else
-    f = OssStats::PromisesConfig.config_file
+    f = config.config_file
     expanded_config = File.expand_path(f) if f
   end
 
   if expanded_config && File.exist?(expanded_config)
     log.debug("Loading config from #{expanded_config}")
-    OssStats::PromisesConfig.from_file(expanded_config)
+    config.from_file(expanded_config)
   end
-  OssStats::PromisesConfig.merge!(options)
-  log.level = OssStats::PromisesConfig.log_level
-
-  config = OssStats::PromisesConfig
+  config.merge!(options)
+  log.level = config.log_level
 
   initialize_db(config.db_file)
 

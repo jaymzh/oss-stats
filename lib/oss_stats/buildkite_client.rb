@@ -2,6 +2,8 @@ require 'net/http'
 require 'json'
 require 'uri'
 
+require_relative 'log'
+
 module OssStats
   # Client for interacting with the Buildkite GraphQL API.
   class BuildkiteClient
@@ -12,17 +14,16 @@ module OssStats
     # @param token [String] The Buildkite API token.
     # @param organization_slug [String] The slug of the Buildkite organization.
 
-    def initialize(token, organization_slug)
+    def initialize(token)
       @token = token
-      @organization_slug = organization_slug
       @graphql_endpoint = URI('https://graphql.buildkite.com/v1')
     end
 
-    def get_pipeline(pipeline_slug)
-      log.debug("Fetching pipeline: #{@organization_slug}/#{pipeline_slug}")
+    def get_pipeline(org, pipeline)
+      log.debug("Fetching pipeline: #{org}/#{pipeline}")
       query = <<~GRAPHQL
         query {
-          pipeline(slug: "#{@organization_slug}/#{pipeline_slug}") {
+          pipeline(slug: "#{org}/#{pipeline}") {
             visibility
           }
         }
@@ -34,26 +35,26 @@ module OssStats
         # The query returned, and the 'pipeline' key exists but is null,
         # meaning the pipeline was not found by Buildkite.
         log.debug(
-          "Pipeline #{@organization_slug}/#{pipeline_slug} not found.",
+          "Pipeline #{org}/#{pipeline} not found.",
         )
       elsif pipeline_data.nil? && response_data['errors']
         # Errors occurred, already logged by execute_graphql_query,
         # but we might want to note the slug it failed for.
         log.warn(
-          "Failed to fetch pipeline #{@organization_slug}/#{pipeline_slug}" +
+          "Failed to fetch pipeline #{org}/#{pipeline}" +
           'due to API errors',
         )
       end
       pipeline_data
     rescue StandardError => e
       log.error(
-        'Error in get_pipeline for slug ' +
-        "#{@organization_slug}/#{pipeline_slug}: #{e.message}",
+        "Error in get_pipeline for slug #{org}/#{pipeline}: #{e.message}",
       )
       nil
     end
 
-    def all_pipelines
+    def all_pipelines(org)
+      log.debug("Fetching all pipeline in #{org}")
       pipelines = []
       after_cursor = nil
       has_next_page = true
@@ -61,7 +62,7 @@ module OssStats
       while has_next_page
         query = <<~GRAPHQL
           query {
-            organization(slug: "#{@organization_slug}") {
+            organization(slug: "#{org}") {
               pipelines(
                 first: 50,
                 after: #{after_cursor ? "\"#{after_cursor}\"" : 'null'}
@@ -88,19 +89,27 @@ module OssStats
         current_pipelines = response_data.dig(
           'data', 'organization', 'pipelines', 'edges'
         )
-        pipelines.concat(current_pipelines.map do |edge|
-                           edge['node']
-                         end) if current_pipelines
+        if current_pipelines
+          pipelines.concat(
+            current_pipelines.map { |edge| edge['node'] },
+          )
+        end
 
         page_info = response_data.dig(
           'data', 'organization', 'pipelines', 'pageInfo'
         )
+        break unless page_info
         has_next_page = page_info['hasNextPage']
         after_cursor = page_info['endCursor']
       end
 
+      pipelines
+    end
+
+    def pipelines_by_repo(org)
+      log.debug("pipelines_by_repo: #{org}")
       pipelines_by_repo = Hash.new { |h, k| h[k] = [] }
-      pipelines.each do |pipeline|
+      all_pipelines(org).each do |pipeline|
         repo_url = pipeline.dig('repository', 'url').gsub('.git', '')
         next unless repo_url
 
@@ -118,15 +127,13 @@ module OssStats
     #
     # @param pipeline_slug [String] The slug of the pipeline
     #   (without the organization part).
-    # @param pull_request_id [String, nil] The ID of the pull request
-    #   (currently not used in the query).
     # @param from_date [Date] The start date for fetching builds.
     # @param to_date [Date] The end date for fetching builds.
     # @return [Array<Hash>] An array of build edges from the GraphQL response.
     #   Each edge contains a 'node' with build details including 'state',
     #   'createdAt', and 'jobs'.
     #   Returns an empty array if an error occurs or no builds are found.
-    def get_pipeline_builds(pipeline_slug, _pull_request_id, from_date, to_date)
+    def get_pipeline_builds(org, pipeline, from_date, to_date, branch = 'main')
       all_build_edges = []
       after_cursor = nil
       has_next_page = true
@@ -134,17 +141,18 @@ module OssStats
       while has_next_page
         query = <<~GRAPHQL
           query {
-            pipeline(slug: "#{@organization_slug}/#{pipeline_slug}") {
+            pipeline(slug: "#{org}/#{pipeline}") {
               builds(
                 first: 50,
                 after: #{after_cursor ? "\"#{after_cursor}\"" : 'null'},
                 createdAtFrom: "#{from_date.to_datetime.rfc3339}",
                 createdAtTo: "#{to_date.to_datetime.rfc3339}",
-                branch: "main"
+                branch: "#{branch}",
               ) {
                 edges {
                   node {
                     url
+                    id
                     state
                     createdAt
                     message
@@ -176,8 +184,7 @@ module OssStats
       all_build_edges
     rescue StandardError => e
       log.error(
-        'Error in get_pipeline_builds for slug ' +
-        "#{@organization_slug}/#{pipeline_slug}: #{e.message}",
+        "Error in get_pipeline_builds for #{org}/#{pipeline}: #{e.message}",
       )
       [] # Return empty array on error
     end

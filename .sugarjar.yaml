@@ -2,3 +2,5 @@ on_push: [lint]
 lint:
   - scripts/run_cookstyle.sh -a
   - scripts/run_markdownlint.sh .
+unit:
+  - scripts/run_specs.sh

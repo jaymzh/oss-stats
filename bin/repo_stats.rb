@@ -7,14 +7,14 @@ require 'octokit'
 require 'base64'
 require 'set'
 
-require_relative 'lib/oss_stats/log'
-require_relative 'lib/oss_stats/ci_stats_config'
-require_relative 'lib/oss_stats/github_token'
-require_relative 'lib/oss_stats/buildkite_token'
-require_relative 'lib/oss_stats/buildkite_client'
+require_relative '../lib/oss_stats/log'
+require_relative '../lib/oss_stats/config/repo_stats'
+require_relative '../lib/oss_stats/github_token'
+require_relative '../lib/oss_stats/buildkite_token'
+require_relative '../lib/oss_stats/buildkite_client'
 
 def rate_limited_sleep
-  limit_gh_ops_per_minute = OssStats::CiStatsConfig.limit_gh_ops_per_minute
+  limit_gh_ops_per_minute = OssStats::Config::RepoStats.limit_gh_ops_per_minute
   if limit_gh_ops_per_minute&.positive?
     sleep_time = 60.0 / limit_gh_ops_per_minute
     log.debug("Sleeping for #{sleep_time.round(2)}s to honor rate-limit")
@@ -25,10 +25,11 @@ end
 # Fetches and processes Pull Request and Issue statistics for a given repository
 # from GitHub within a specified number of days.
 #
-# @param client [Octokit::Client] The Octokit client for GitHub API interaction.
+# @param gh_client [Octokit::Client] The Octokit client for GitHub API
+#   interaction.
 # @param options [Hash] A hash containing options like :org, :repo, and :days.
 # @return [Hash] A hash containing processed PR and issue statistics and lists.
-def get_pr_and_issue_stats(client, options)
+def get_pr_and_issue_stats(gh_client, options)
   repo = "#{options[:org]}/#{options[:repo]}"
   cutoff_date = Date.today - options[:days]
   pr_stats = {
@@ -57,7 +58,7 @@ def get_pr_and_issue_stats(client, options)
   page = 1
 
   loop do
-    items = client.issues(repo, state: 'all', per_page: 100, page:)
+    items = gh_client.issues(repo, state: 'all', per_page: 100, page:)
     break if items.empty?
 
     all_items_before_cutoff = true
@@ -129,6 +130,36 @@ def get_pr_and_issue_stats(client, options)
   { pr: pr_stats, issue: issue_stats, pr_list: prs, issue_list: issues }
 end
 
+def pipelines_from_readme(readme)
+  pipelines = []
+  # Regex to find Buildkite badge markdown and capture the pipeline slug
+  # from the link URL. Example:
+  # [![Build Status](badge.svg)](https://buildkite.com/org/pipeline)
+  # Captures:
+  # 1: Full URL (https://buildkite.com/org/pipeline)
+  # 2: Org slug (org)
+  # 3: Pipeline slug (pipeline)
+  buildkite_badge_regex =
+    %r{\)\]\((https://buildkite\.com\/([^\/]+)\/([^\/\)]+))\)}
+  matches = readme.scan(buildkite_badge_regex)
+  if matches.length.zero?
+    log.debug('no BK pipelines found in readme')
+    return pipelines
+  end
+
+  matches.each do |match|
+    buildkite_org = match[1]
+    pipeline = match[2]
+    pipelines << { org: buildkite_org, pipeline: }
+
+    log.debug(
+      "Found Buildkite pipeline: #{buildkite_org}/#{pipeline} in README",
+    )
+  end
+
+  pipelines
+end
+
 # Fetches failed test results from CI systems (GitHub Actions and Buildkite)
 # for a given repository and branches.
 #
@@ -140,12 +171,15 @@ end
 # subsequently fixed by a successful run on the same branch, it's considered
 # to be continuously failing.
 #
-# @param client [Octokit::Client] The Octokit client for GitHub API interaction.
+# @param gh_client [Octokit::Client] The Octokit client for GitHub API
+#   interaction.
 # @param settings [Hash] A hash containing settings like :org, :repo, :days, and
 #   :branches.
 # @return [Hash] A hash where keys are branch names, and values are hashes of
 #   job names to a Set of dates the job failed.
-def get_failed_tests_from_ci(client, settings)
+def get_failed_tests_from_ci(
+  gh_client, bk_client, settings, bk_pipelines_by_repo
+)
   repo = "#{settings[:org]}/#{settings[:repo]}"
   cutoff_date = Date.today - settings[:days]
   today = Date.today
@@ -159,108 +193,116 @@ def get_failed_tests_from_ci(client, settings)
   processed_branches.each { |b| failed_tests[b] = {} }
 
   # Buildkite CI
-  log.debug("Checking for Buildkite integration for #{repo}")
-  begin
-    readme_content = Base64.decode64(client.readme(repo).content)
-    rate_limited_sleep
-    # Regex to find Buildkite badge markdown and capture the pipeline slug
-    # from the link URL. Example:
-    # [![Build Status](badge.svg)](https://buildkite.com/org/pipeline)
-    # Captures:
-    # 1: Full URL (https://buildkite.com/org/pipeline)
-    # 2: Org slug (org)
-    # 3: Pipeline slug (pipeline)
-    buildkite_badge_regex =
-      %r{\)\]\((https://buildkite\.com\/([^\/]+)\/([^\/\)]+))\)}
-    match = readme_content.match(buildkite_badge_regex)
-
-    if match
-      buildkite_org_slug = match[2]
-      pipeline_slug_from_regex = match[3]
-      # Pipeline slug from regex might be "org/pipeline" or just "pipeline".
-      # The BuildkiteClient expects only the pipeline name part, as it uses its
-      # own organization slug during initialization.
-      pipeline_name_only = pipeline_slug_from_regex.split('/').last
-
-      log.debug(
-        'Found Buildkite pipeline: ' +
-        "#{buildkite_org_slug}/#{pipeline_name_only} in README for #{repo}",
+  if bk_client
+    begin
+      log.debug("Checking for Buildkite integration for #{repo}")
+      pipelines_to_check = Set.new
+      pipelines_to_check.merge(
+        bk_pipelines_by_repo.fetch("https://github.com/#{repo}", []).map do |x|
+          {
+            org: OssStats::Config::RepoStats.buildkite_org,
+            pipeline: x[:slug],
+          }
+        end,
       )
+      begin
+        readme = Base64.decode64(gh_client.readme(repo).content)
+        rate_limited_sleep
 
-      buildkite_token = get_buildkite_token!(OssStats::CiStatsConfig)
-      buildkite_client = OssStats::BuildkiteClient.new(
-        buildkite_token, buildkite_org_slug
-      )
+        pipelines_to_check.merge(pipelines_from_readme(readme))
+      rescue Octokit::NotFound
+        log.warn(
+          "README.md not found for repo #{repo}. Skipping Buildkite check.",
+        )
+      end
+
       from_date = Date.today - settings[:days]
       today = Date.today
-
-      processed_branches.each do |branch|
-        log.debug(
-          'Fetching Buildkite builds for ' +
-          "#{buildkite_org_slug}/#{pipeline_name_only}, branch: #{branch}",
-        )
-        api_builds = buildkite_client.get_pipeline_builds(
-          pipeline_name_only, nil, from_date, today
-        )
-
-        # Sort builds by createdAt timestamp to process chronologically
-        # rubocop:disable Style/MultilineBlockChain
-        sorted_builds = api_builds.select do |b_edge|
-          b_edge&.dig('node', 'createdAt')
-        end.sort_by { |b_edge| DateTime.parse(b_edge['node']['createdAt']) }
-        # rubocop:enable Style/MultilineBlockChain
-
-        last_failure_date_bk = {}
-
-        sorted_builds.each do |build_edge|
-          build = build_edge['node']
-          begin
-            build_date = DateTime.parse(build['createdAt']).to_date
-          rescue ArgumentError, TypeError
-            log.warn(
-              "Invalid createdAt date for build in #{pipeline_name_only}: " +
-              "'#{build['createdAt']}'. Skipping this build.",
-            )
+      pipelines_to_check.each do |pl|
+        processed_branches.each do |branch|
+          log.debug(
+            "Fetching Buildkite builds for #{pl}, branch: #{branch}",
+          )
+          api_builds = bk_client.get_pipeline_builds(
+            pl[:org], pl[:pipeline], from_date, today, branch
+          )
+          if api_builds.length.zero?
+            log.debug("No builds for #{pl} on #{branch}")
             next
           end
 
-          # Ensure build is within the processing date range
-          next if build_date < from_date
+          # Sort builds by createdAt timestamp to process chronologically
+          # rubocop:disable Style/MultilineBlockChain
+          sorted_builds = api_builds.select do |b_edge|
+            b_edge&.dig('node', 'createdAt')
+          end.sort_by { |b_edge| DateTime.parse(b_edge['node']['createdAt']) }
+          # rubocop:enable Style/MultilineBlockChain
 
-          next unless build['state']
-          job_key = "[BK] #{buildkite_org_slug}/#{pipeline_name_only}"
+          last_failure_date_bk = {}
 
-          if build['state'] == 'FAILED'
-            (failed_tests[branch][job_key] ||= Set.new) << build_date
-            log.debug("Marking #{job_key} as failed (#{build_date})")
-            last_failure_date_bk[job_key] = build_date
-          elsif build['state'] == 'PASSED'
-            # If a job passes, and it had a recorded failure on or before this
-            # build's date, clear it from ongoing failures.
-            if last_failure_date_bk[job_key] &&
-               last_failure_date_bk[job_key] <= build_date
-              log.debug("Unmarking #{job_key} as failed (#{build_date})")
-              last_failure_date_bk.delete(job_key)
+          sorted_builds.each do |build_edge|
+            build = build_edge['node']
+            id = build['id']
+            log.debug("Build #{id} for #{pl}")
+            begin
+              build_date = DateTime.parse(build['createdAt']).to_date
+            rescue ArgumentError, TypeError
+              log.warn(
+                "Invalid createdAt date for build in #{pl}: " +
+                "'#{build['createdAt']}'. Skipping this build.",
+              )
+              next
+            end
+
+            # Ensure build is within the processing date range
+            if build_date < from_date
+              log.debug('Build before time we care about, skipping')
+              next
+            end
+
+            unless build['state']
+              log.debug('no build state, skipping')
+              next
+            end
+            job_key = "[BK] #{pl[:org]}/#{pl[:pipeline]}"
+
+            if build['state'] == 'FAILED'
+              (failed_tests[branch][job_key] ||= Set.new) << build_date
+              log.debug("Marking #{job_key} as failed (#{id} on #{build_date})")
+              last_failure_date_bk[job_key] = build_date
+            elsif build['state'] == 'PASSED'
+              # If a job passes, and it had a recorded failure on or before this
+              # build's date, clear it from ongoing failures.
+              if last_failure_date_bk[job_key] &&
+                 last_failure_date_bk[job_key] <= build_date
+                log.debug(
+                  "Unmarking #{job_key} as failed (#{id} on #{build_date})",
+                )
+                last_failure_date_bk.delete(job_key)
+              else
+                log.debug(
+                  "Ignoring #{job_key} success earlier than last failure" +
+                  " (#{id} on #{build_date})",
+                )
+              end
+            else
+              log.debug("State is #{build['state']}, ignoring")
+            end
+          end
+
+          # Propagate ongoing failures: if a job failed and didn't pass later,
+          # mark all subsequent days until today as failed.
+          last_failure_date_bk.each do |job_key, last_fail_date|
+            (last_fail_date + 1..today).each do |date|
+              (failed_tests[branch][job_key] ||= Set.new) << date
             end
           end
         end
-
-        # Propagate ongoing failures: if a job failed and didn't pass later,
-        # mark all subsequent days until today as failed.
-        last_failure_date_bk.each do |job_key, last_fail_date|
-          (last_fail_date + 1..today).each do |date|
-            (failed_tests[branch][job_key] ||= Set.new) << date
-          end
-        end
       end
-    elsif readme_content # Readme exists but no badge found
-      log.debug("No Buildkite badge found in README for #{repo}")
+    rescue StandardError => e
+      log.error("Error during Buildkite integration for #{repo}: #{e.message}")
+      log.debug(e.backtrace.join("\n"))
     end
-  rescue Octokit::NotFound
-    log.warn("README.md not found for repo #{repo}. Skipping Buildkite check.")
-  rescue StandardError => e
-    log.error("Error during Buildkite integration for #{repo}: #{e.message}")
-    log.debug(e.backtrace.join("\n"))
   end
 
   # GitHub Actions CI
@@ -269,7 +311,7 @@ def get_failed_tests_from_ci(client, settings)
       "Checking GitHub Actions workflow runs for #{repo}, branch: #{branch}",
     )
     begin
-      workflows = client.workflows(repo).workflows
+      workflows = gh_client.workflows(repo).workflows
       rate_limited_sleep
       workflows.each do |workflow|
         log.debug("Workflow: #{workflow.name}")
@@ -277,7 +319,7 @@ def get_failed_tests_from_ci(client, settings)
         page = 1
         loop do
           log.debug("  Acquiring page #{page}")
-          runs = client.workflow_runs(
+          runs = gh_client.workflow_runs(
             repo, workflow.id, branch:, status: 'completed', per_page: 100,
             page:
           )
@@ -299,7 +341,7 @@ def get_failed_tests_from_ci(client, settings)
           run_date = run.created_at.to_date
           next if run_date < cutoff_date
 
-          jobs = client.workflow_run_jobs(repo, run.id, per_page: 100).jobs
+          jobs = gh_client.workflow_run_jobs(repo, run.id, per_page: 100).jobs
           rate_limited_sleep
 
           jobs.each do |job|
@@ -437,6 +479,15 @@ def parse_options # rubocop:disable Metrics/MethodLength, Metrics/AbcSize
     end
 
     opts.on(
+      '--buildkite-org ORG',
+      String,
+      'Buildkite org to find pipelines in. If specified any pipeline in that' +
+      ' org associated with any repos we report on will be included.',
+    ) do |v|
+      options[:buildkite_org] = v
+    end
+
+    opts.on(
       '-c FILE',
       '--config FILE_PATH',
       String,
@@ -464,18 +515,34 @@ def parse_options # rubocop:disable Metrics/MethodLength, Metrics/AbcSize
     end
 
     opts.on(
-      '--github-token TOKEN',
-      'GitHub personal access token',
-    ) do |v|
-      options[:github_token] = v
-    end
-
-    opts.on(
       '--github-api-endpoint ENDPOINT',
       String,
       'GitHub API endpoint',
     ) do |v|
       options[:github_api_endpoint] = v
+    end
+
+    opts.on(
+      '--github-org ORG_NAME',
+      String,
+      'GitHub organization name',
+    ) do |v|
+      options[:github_org] = v
+    end
+
+    opts.on(
+      '--github-repo REPO_NAME',
+      String,
+      'GitHub repository name',
+    ) do |v|
+      options[:github_repo] = v
+    end
+
+    opts.on(
+      '--github-token TOKEN',
+      'GitHub personal access token',
+    ) do |v|
+      options[:gh_token] = v
     end
 
     opts.on(
@@ -496,7 +563,7 @@ def parse_options # rubocop:disable Metrics/MethodLength, Metrics/AbcSize
     opts.on(
       '-l LEVEL',
       '--log-level LEVEL',
-      %i{debug info warn error fatal},
+      %i{trace debug info warn error fatal},
       'Set logging level to LEVEL. [default: info]',
     ) do |level|
       options[:log_level] = level
@@ -515,77 +582,71 @@ def parse_options # rubocop:disable Metrics/MethodLength, Metrics/AbcSize
       end
       options[:mode] = v.map(&:downcase)
     end
-
-    opts.on(
-      '--org ORG_NAME',
-      String,
-      'GitHub organization name',
-    ) do |v|
-      options[:org] = v
-    end
-
-    opts.on(
-      '--repo REPO_NAME',
-      String,
-      'GitHub repository name',
-    ) do |v|
-      options[:repo] = v
-    end
   end.parse!
 
   # Set log level from CLI options first if provided
   log.level = options[:log_level] if options[:log_level]
+  config = OssStats::Config::RepoStats
 
   # Determine config file path.
-  config_file_to_load = options[:config] || OssStats::CiStatsConfig.config_file
+  config_file_to_load = options[:config] || config.config_file
 
   # Load config from file if found
   if config_file_to_load && File.exist?(config_file_to_load)
     expanded_config_path = File.expand_path(config_file_to_load)
     log.info("Loaded configuration from: #{expanded_config_path}")
-    OssStats::CiStatsConfig.from_file(expanded_config_path)
+    config.from_file(expanded_config_path)
   elsif options[:config] # Config file specified via CLI but not found
     log.fatal("Specified config file '#{options[:config]}' not found.")
     exit 1
   end
 
   # Merge CLI options into the configuration. CLI options take precedence.
-  OssStats::CiStatsConfig.merge!(options)
+  config.merge!(options)
 
   # Set final log level from potentially merged config
-  log.level = OssStats::CiStatsConfig.log_level
+  log.level = config.log_level
 
   # Handle org/repo specified via CLI: overrides any config file orgs/repos.
-  if options[:org] && options[:repo]
+  if options[:github_org] && options[:github_repo]
     log.debug('Using organization and repository from command line arguments.')
     # Fetch existing repo config to preserve specific settings if any,
     # otherwise, it will be an empty hash.
-    org_settings =
-      OssStats::CiStatsConfig.organizations.fetch(options[:org], {})
+    org_settings = config.organizations.fetch(options[:github_org], {})
     repo_settings =
-      org_settings.fetch('repositories', {}).fetch(options[:repo], {})
+      org_settings.fetch('repositories', {}).fetch(options[:github_repo], {})
 
-    OssStats::CiStatsConfig.organizations = {
-      options[:org] => {
-        'repositories' => { options[:repo] => repo_settings },
+    config.organizations = {
+      options[:github_org] => {
+        'repositories' => { options[:github_repo] => repo_settings },
       },
     }
-  elsif options[:org] || options[:repo] # Only one of org/repo specified
+  elsif options[:github_org] || options[:github_repo]
     log.fatal(
-      'Error: Both --org and --repo must be specified if either is used.',
+      'Error: None or both of --github-org and --github-repo must be specified',
     )
     exit 1
   end
 end
 
 def main
-  parse_options # Parse CLI options and load config
+  parse_options
+  config = OssStats::Config::RepoStats
+  mode = config.mode
+  mode = %w{ci pr issue} if mode.include?('all')
 
-  github_token = get_github_token!(OssStats::CiStatsConfig)
-  client = Octokit::Client.new(
-    access_token: github_token,
-    api_endpoint: OssStats::CiStatsConfig.github_api_endpoint,
+  # get tokens early so we fail if we're missing them
+  gh_token = get_github_token!(config)
+  gh_client = Octokit::Client.new(
+    access_token: gh_token,
+    api_endpoint: config.github_api_endpoint,
   )
+
+  if mode.include?('ci') && config.buildkite_org
+    bk_token = get_buildkite_token!(config)
+    bk_client = OssStats::BuildkiteClient.new(bk_token)
+    bk_pipelines_by_repo = bk_client.pipelines_by_repo(config.buildkite_org)
+  end
 
   # Lambda to construct effective settings for a repository by merging
   # global, org-level, and repo-level configurations.
@@ -594,10 +655,10 @@ def main
       effective = { org:, repo: repo_name }
       effective[:days] = repo_conf['days'] ||
                          org_conf['default_days'] ||
-                         OssStats::CiStatsConfig.default_days
+                         config.default_days
       branches_setting = repo_conf['branches'] ||
                          org_conf['default_branches'] ||
-                         OssStats::CiStatsConfig.default_branches
+                         config.default_branches
       effective[:branches] = if branches_setting.is_a?(String)
                                branches_setting.split(',').map(&:strip)
                              else
@@ -606,19 +667,15 @@ def main
       effective
     end
 
-  # Determine which modes of operation are active (ci, pr, issue)
-  mode = OssStats::CiStatsConfig.mode
-  mode = %w{ci pr issue} if mode.include?('all')
-
   # Prepare list of repositories to process based on configuration
   repos_to_process = []
-  if OssStats::CiStatsConfig.organizations.nil? ||
-     OssStats::CiStatsConfig.organizations.empty?
+  if config.organizations.nil? ||
+     config.organizations.empty?
     log.warn('No organizations or repositories configured to process. Exiting.')
     exit 0
   end
 
-  OssStats::CiStatsConfig.organizations.each do |org_name, org_level_config|
+  config.organizations.each do |org_name, org_level_config|
     log.debug("Processing configuration for organization: #{org_name}")
     repos = org_level_config['repositories'] || {}
     repos.each do |repo_name, repo_level_config|
@@ -647,17 +704,17 @@ def main
 
     # Fetch and print PR and Issue stats if PR or Issue mode is active
     if %w{pr issue}.any? { |m| mode.include?(m) }
-      stats = get_pr_and_issue_stats(client, settings)
+      stats = get_pr_and_issue_stats(gh_client, settings)
       %w{PR Issue}.each do |type|
         next unless mode.include?(type.downcase)
-        print_pr_or_issue_stats(
-          stats, type, OssStats::CiStatsConfig.include_list
-        )
+        print_pr_or_issue_stats(stats, type, config.include_list)
       end
     end
 
     next unless mode.include?('ci')
-    test_failures = get_failed_tests_from_ci(client, settings)
+    test_failures = get_failed_tests_from_ci(
+      gh_client, bk_client, settings, bk_pipelines_by_repo
+    )
     print_ci_status(test_failures)
   end
 end
