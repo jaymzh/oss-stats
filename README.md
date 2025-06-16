@@ -20,6 +20,10 @@ various metrics around health of an open source project.
 You'll want to create your own repository to keep the data and results that
 these scripts use and generate about your project.
 
+Currently docs and tools are all setup for you to keep your repo and this repo
+checked out at the same level and use `oss-stats` directly from git. Once we
+get a release out the door, we'll update this with alternative options.
+
 This repo has a script that'll do all the required initial work. On your new
 repo, do:
 
@@ -43,7 +47,7 @@ You can see an example of a downstream repo at
 
 ### Repo Stats
 
-[repo_stats](bin/repo_stats.rb) is a tool designed to give a wide range of
+[repo_stats](bin/repo_stats) is a tool designed to give a wide range of
 statistics on everything from PRs response time to CI health. It supports both
 GitHub and Buildkite and is highly configurable.
 
@@ -51,7 +55,7 @@ See [RepoStats.md](docs/RepoStats.md) for full details.
 
 ### Pipeline visibility stats
 
-[pipeline_visibility_stats](bin/pipeline_visibility_stats.rb) is a tool which
+[pipeline_visibility_stats](bin/pipeline_visibility_stats) is a tool which
 walks Buildkite pipelines associated with your public GitHub repositories to
 ensure they are visible to contributors. It has a variety of options to
 exclude pipelines intended to be private (for example, pipelines that may
@@ -62,7 +66,7 @@ details.
 
 ### Meeting Stats
 
-[meeting_stats](bin/meeting_stats.rb) keeps track of things like meeting
+[meeting_stats](bin/meeting_stats) keeps track of things like meeting
 attendance, and expected data to be provided. Currently it is somewhat
 configurable, though the data it keeps track of isn't customizable.
 
@@ -73,11 +77,11 @@ See [MeetingStats.md](docs/MeetingStats.md) for full details.
 
 ### Promises
 
-[promises](bin/promises.rb) allows you to add, edit, resolve, abandon, and
+[promise_stats](bin/promise_stats) allows you to add, edit, resolve, abandon, and
 report on promises made. This can be useful for both promises made to the
 community or promises made between teams.
 
-See [Promises.md](docs/Promises.md) for full details.
+See [PromiseStats.md](docs/PromiseStats.md) for full details.
 
 ## Authentication
 

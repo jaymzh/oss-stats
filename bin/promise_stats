@@ -5,7 +5,7 @@ require 'optparse'
 require 'date'
 
 require_relative '../lib/oss_stats/log'
-require_relative '../lib/oss_stats/config/promises'
+require_relative '../lib/oss_stats/config/promise_stats'
 
 log.level = :info
 
