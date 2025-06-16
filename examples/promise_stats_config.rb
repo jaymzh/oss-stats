@@ -1,4 +1,4 @@
-# Example promises config file.
+# Example promise_stats config file.
 #
 # You can specify anything in here you can specify on the command-line
 # except for --date, --promise, and --reference.

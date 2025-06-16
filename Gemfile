@@ -1,12 +1,6 @@
 source 'https://rubygems.org'
 
-gem 'sqlite3'
-gem 'octokit'
-gem 'faraday-retry'
-gem 'gruff'
-gem 'mixlib-log'
-gem 'mixlib-config'
-gem 'deep_merge'
+gem 'oss-stats', path: '.'
 
 group(:development) do
   # for cookstyle

@@ -1,0 +1,113 @@
+#!/usr/bin/env ruby
+
+require_relative '../lib/oss_stats/repo_stats'
+
+# quick hack to rename this without .rb and jam methods in lib
+extend OssStats::RepoStats
+
+def main
+  parse_options
+  config = OssStats::Config::RepoStats
+  mode = config.mode
+  mode = %w{ci pr issue} if mode.include?('all')
+
+  organizations_to_process = determine_orgs_to_process
+
+  # Prepare list of repositories to process based on configuration
+  repos_to_process = []
+  if organizations_to_process.empty?
+    log.warn('No organizations or repositories configured to process. Exiting.')
+    exit 0
+  end
+
+  # get tokens early so we fail if we're missing them
+  gh_token = get_github_token!(config)
+  gh_client = Octokit::Client.new(
+    access_token: gh_token,
+    api_endpoint: config.github_api_endpoint,
+  )
+
+  if mode.include?('ci') && config.buildkite_org
+    bk_token = get_buildkite_token!(config)
+    bk_client = OssStats::BuildkiteClient.new(bk_token)
+    bk_pipelines_by_repo = bk_client.pipelines_by_repo(config.buildkite_org)
+  end
+
+  organizations_to_process.each do |org_name, org_level_config|
+    log.debug("Processing configuration for organization: #{org_name}")
+    repos = org_level_config['repositories'] || {}
+    repos.each do |repo_name, repo_level_config|
+      log.debug("Processing configuration for repository: #{repo_name}")
+      repos_to_process << get_effective_repo_settings(
+        org_name, repo_name, org_level_config, repo_level_config
+      )
+    end
+  end
+
+  if repos_to_process.empty?
+    log.info(
+      'No repositories found to process after evaluating configurations.',
+    )
+    exit 0
+  end
+
+  # Process each configured repository
+  all_repo_stats = []
+  repos_to_process.each do |settings|
+    repo_full_name = "#{settings[:org]}/#{settings[:repo]}"
+    repo_url = "https://github.com/#{repo_full_name}"
+
+    repo_data = {
+      name: repo_full_name,
+      url: repo_url,
+      settings:,
+      pr_issue_stats: nil,
+      ci_failures: nil,
+    }
+
+    # Fetch PR and Issue stats if PR or Issue mode is active
+    if %w{pr issue}.any? { |m| mode.include?(m) }
+      repo_data[:pr_issue_stats] = get_pr_and_issue_stats(gh_client, settings)
+    end
+
+    # Fetch CI stats if CI mode is active
+    if mode.include?('ci')
+      repo_data[:ci_failures] = get_failed_tests_from_ci(
+        gh_client, bk_client, settings, bk_pipelines_by_repo
+      )
+    end
+    all_repo_stats << repo_data
+  end
+
+  filtered_repos = filter_repositories(all_repo_stats, config)
+
+  filtered_repos.each do |repo_data|
+    if OssStats::Config::RepoStats.no_links
+      log.info(
+        "\n* #{repo_data[:name]} Stats (Last #{repo_data[:settings][:days]}" +
+        ' days) *',
+      )
+    else
+      log.info(
+        "\n*_[#{repo_data[:name]}](#{repo_data[:url]}) Stats " +
+        "(Last #{repo_data[:settings][:days]} days)_*",
+      )
+    end
+
+    if repo_data[:pr_issue_stats]
+      %w{PR Issue}.each do |type|
+        next unless mode.include?(type.downcase)
+        print_pr_or_issue_stats(
+          repo_data[:pr_issue_stats], type, config.include_list
+        )
+      end
+    end
+
+    next unless repo_data[:ci_failures]
+    # Ensure CI mode was active for this data to be present and printed
+    next unless mode.include?('ci')
+    print_ci_status(repo_data[:ci_failures])
+  end
+end
+
+main if __FILE__ == $PROGRAM_NAME
