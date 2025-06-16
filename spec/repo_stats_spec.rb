@@ -720,4 +720,521 @@ RSpec.describe 'repo_stats' do
       end
     end
   end
+
+  describe '#filter_repositories' do
+    let(:config) { OssStats::Config::RepoStats }
+    let(:all_repos) { [] } # Populated in specific contexts
+
+    # Helper to create mock repository data for testing filter_repositories
+    def mock_repo_data(
+      name, stale_pr: 0, stale_issue: 0, oldest_pr_days: 0,
+      oldest_issue_days: 0, avg_close_pr_hours: 0, avg_close_issue_hours: 0,
+      ci_broken_days_map: {}, ci_distinct_broken_jobs: []
+    )
+      pr_stats = {
+        stale_count: stale_pr, oldest_open_days: oldest_pr_days,
+        avg_time_to_close_hours: avg_close_pr_hours, closed: 1,
+        total_close_time: avg_close_pr_hours
+      }
+      issue_stats = {
+        stale_count: stale_issue, oldest_open_days: oldest_issue_days,
+        avg_time_to_close_hours: avg_close_issue_hours, closed: 1,
+        total_close_time: avg_close_issue_hours
+      }
+
+      # ci_broken_days_map: { "job_name" => num_days_failed, ... }
+      # ci_distinct_broken_jobs: ["job_name1", "job_name2", ...]
+      ci_failures_data = nil
+      if !ci_broken_days_map.empty? || !ci_distinct_broken_jobs.empty?
+        ci_failures_data = { 'main' => {} }
+
+        ci_broken_days_map.each do |job_name, days_count|
+          ci_failures_data['main'][job_name] = {
+            dates: Set.new((1..days_count).map { |i| Date.today - i }),
+            url: "http://ci.com/#{job_name}",
+          }
+        end
+
+        ci_distinct_broken_jobs.each do |job_name|
+          next if ci_failures_data['main'].key?(job_name)
+          ci_failures_data['main'][job_name] = {
+            dates: Set[Date.today - 1],
+            url: "http://ci.com/#{job_name}",
+          }
+        end
+      end
+
+      {
+        name:,
+        url: "http://github.com/org/#{name}",
+        settings: { days: 30 }, # Default settings
+        pr_issue_stats: {
+          pr: pr_stats, issue: issue_stats,
+          pr_list: { open: [], closed: [] },
+          issue_list: { open: [], closed: [] }
+        },
+        ci_failures: ci_failures_data,
+      }
+    end
+
+    after(:each) do
+      config.top_n_stale = nil
+      config.top_n_oldest = nil
+      config.top_n_time_to_close = nil
+      config.top_n_most_broken_ci_days = nil
+      config.top_n_most_broken_ci_jobs = nil
+      config.top_n_stale_pr = nil
+      config.top_n_stale_issue = nil
+      config.top_n_oldest_pr = nil
+      config.top_n_oldest_issue = nil
+      config.top_n_time_to_close_pr = nil
+      config.top_n_time_to_close_issue = nil
+    end
+
+    before do
+      config.mode = %w{pr issue ci}
+    end
+
+    context 'when no filters are set' do
+      let(:repos_data) do
+        [
+          mock_repo_data('repo1', stale_pr: 1),
+          mock_repo_data('repo2', stale_pr: 2),
+        ]
+      end
+
+      it 'returns all repositories' do
+        result = filter_repositories(repos_data, config).map { |r| r[:name] }
+        expect(result).to match_array(%w{repo1 repo2})
+      end
+    end
+
+    context 'with a single filter (absolute number)' do
+      let(:repos_data) do
+        [
+          mock_repo_data('repo1', stale_pr: 10), # Most stale
+          mock_repo_data('repo2', stale_pr: 5),  # Second most
+          mock_repo_data('repo3', stale_pr: 1),
+        ]
+      end
+
+      it 'returns the top N repositories for that filter' do
+        config.top_n_stale = 2
+        filtered = filter_repositories(repos_data, config)
+        expect(filtered.map { |r| r[:name] }).to match_array(%w{repo1 repo2})
+      end
+
+      it 'returns all repositories if N is larger than the number of repos' do
+        config.top_n_stale = 5
+        filtered = filter_repositories(repos_data, config)
+        expect(filtered.map { |r| r[:name] })
+          .to match_array(%w{repo1 repo2 repo3})
+      end
+    end
+
+    context 'with a single filter (percentage)' do
+      let(:repos_data) do
+        [
+          mock_repo_data('repo1', oldest_pr_days: 100), # Oldest
+          mock_repo_data('repo2', oldest_pr_days: 90),  # Second oldest
+          mock_repo_data('repo3', oldest_pr_days: 80),
+          mock_repo_data('repo4', oldest_pr_days: 70),
+        ]
+      end
+
+      it 'returns the top N% repositories (even count)' do
+        config.top_n_oldest = 0.5 # 50%
+        filtered = filter_repositories(repos_data, config)
+        # 50% of 4 is 2. Expect repo1, repo2
+        expect(filtered.map { |r| r[:name] }).to match_array(%w{repo1 repo2})
+      end
+
+      it 'returns the top N% repositories (odd count, ceil)' do
+        three_repos = repos_data[0..2] # repo1, repo2, repo3
+        config.top_n_oldest = 0.5 # 50%
+        filtered = filter_repositories(three_repos, config)
+        # 50% of 3 is 1.5, ceil(1.5) is 2. Expect repo1, repo2
+        expect(filtered.map { |r| r[:name] }).to match_array(%w{repo1 repo2})
+      end
+    end
+
+    context 'with multiple filters' do
+      let(:repos_data) do
+        [
+          # High stale, low CI
+          mock_repo_data(
+            'repoA', stale_pr: 10, ci_broken_days_map: { 'job1' => 1 }
+          ),
+          # Low stale, high CI
+          mock_repo_data(
+            'repoB', stale_pr: 1, ci_broken_days_map: { 'job1' => 10 }
+          ),
+          # Medium for both
+          mock_repo_data(
+            'repoC', stale_pr: 2, ci_broken_days_map: { 'job1' => 2 }
+          ),
+          # Low for both
+          mock_repo_data('repoD', stale_pr: 0, ci_broken_days_map: {}),
+        ]
+      end
+
+      it 'returns repositories meeting any condition without duplicates' do
+        # Expect repoA
+        config.top_n_stale = 1
+        # Expect repoB
+        config.top_n_most_broken_ci_days = 1
+
+        filtered = filter_repositories(repos_data, config)
+        expect(filtered.map { |r| r[:name] }).to match_array(%w{repoA repoB})
+      end
+    end
+
+    context 'with all filters active' do
+      let(:repos_data) do
+        [
+          mock_repo_data('r_stale', stale_pr: 100),
+          mock_repo_data('r_oldest', oldest_issue_days: 100),
+          mock_repo_data('r_ttc', avg_close_pr_hours: 100),
+          mock_repo_data('r_ci_days',
+ci_broken_days_map: { 'main_job' => 100 }),
+          mock_repo_data(
+            'r_ci_jobs',
+            ci_distinct_broken_jobs: %w{j1 j2 j3 j4 j5},
+          ),
+          mock_repo_data(
+            'r_all_low',
+            stale_pr: 1,
+            oldest_issue_days: 1,
+            avg_close_pr_hours: 1,
+            ci_broken_days_map: { 'mj' => 1 },
+            ci_distinct_broken_jobs: ['j'],
+          ),
+        ]
+      end
+
+      it 'returns repositories meeting any of the criteria' do
+        # r_stale
+        config.top_n_stale = 1
+        # r_oldest
+        config.top_n_oldest = 1
+        # r_ttc
+        config.top_n_time_to_close = 1
+        # r_ci_days
+        config.top_n_most_broken_ci_days = 1
+        # r_ci_jobs
+        config.top_n_most_broken_ci_jobs = 1
+
+        filtered = filter_repositories(repos_data, config)
+        expect(filtered.map { |r| r[:name] })
+          .to match_array(%w{r_stale r_oldest r_ttc r_ci_days r_ci_jobs})
+      end
+    end
+
+    context 'edge cases' do
+      it 'returns an empty list if no repositories meet criteria' do
+        repos = [mock_repo_data('repo1', stale_pr: 0)]
+        config.top_n_stale = 1
+        expect(filter_repositories(repos, config)).to be_empty
+      end
+
+      it 'returns an empty list if input is empty' do
+        expect(filter_repositories([], config)).to be_empty
+      end
+    end
+
+    context 'data integrity' do
+      it 'returned repositories retain their original data structure' do
+        repo = mock_repo_data('integrity_test', stale_pr: 10)
+        config.top_n_stale = 1
+        filtered = filter_repositories([repo], config)
+        expect(filtered.first).to eq(repo)
+        expect(filtered.first[:pr_issue_stats][:pr][:stale_count]).to eq(10)
+      end
+    end
+
+    context 'specific filter logic: top_n_stale' do
+      let(:repos_data) do
+        [
+          mock_repo_data(
+            'repo_pr_high_issue_low', stale_pr: 10, stale_issue: 1
+          ),
+          mock_repo_data(
+            'repo_pr_low_issue_high', stale_pr: 1, stale_issue: 12
+          ),
+          mock_repo_data('repo_both_mid', stale_pr: 5, stale_issue: 5),
+          mock_repo_data('repo_both_low', stale_pr: 1, stale_issue: 1),
+        ]
+      end
+      it 'selects based on MAX of stale PRs or Issues' do
+        # Expect repo_pr_low_issue_high (12), repo_pr_high_issue_low (10)
+        config.top_n_stale = 2
+        filtered_names = filter_repositories(repos_data, config)
+                         .map { |r| r[:name] }
+        expect(filtered_names)
+          .to match_array(%w{repo_pr_low_issue_high repo_pr_high_issue_low})
+      end
+    end
+
+    context 'specific filter logic: top_n_oldest' do
+      let(:repos_data) do
+        [
+          mock_repo_data(
+            'repo_pr_old', oldest_pr_days: 100, oldest_issue_days: 10
+          ),
+          mock_repo_data(
+            'repo_issue_old', oldest_pr_days: 10, oldest_issue_days: 100
+          ),
+          mock_repo_data(
+            'repo_both_young', oldest_pr_days: 5, oldest_issue_days: 5
+          ),
+        ]
+      end
+      it 'selects based on max of oldest PR or Issue' do
+        config.top_n_oldest = 2 # Expect repo_pr_old, repo_issue_old
+        filtered_names = filter_repositories(repos_data, config)
+                         .map { |r| r[:name] }
+        expect(filtered_names).to match_array(%w{repo_pr_old repo_issue_old})
+      end
+    end
+
+    context 'specific filter logic: top_n_time_to_close' do
+      let(:repos_data) do
+        [
+          mock_repo_data(
+            'repo_pr_slow', avg_close_pr_hours: 100, avg_close_issue_hours: 10
+          ),
+          mock_repo_data(
+            'repo_issue_slow', avg_close_pr_hours: 10,
+            avg_close_issue_hours: 100
+          ),
+          mock_repo_data(
+            'repo_both_fast', avg_close_pr_hours: 5, avg_close_issue_hours: 5
+          ),
+        ]
+      end
+      it 'selects based on max of PR or Issue avg time to close' do
+        # Expect repo_pr_slow, repo_issue_slow
+        config.top_n_time_to_close = 2
+        filtered_names = filter_repositories(repos_data, config)
+                         .map { |r| r[:name] }
+        expect(filtered_names).to match_array(%w{repo_pr_slow repo_issue_slow})
+      end
+    end
+
+    context 'specific filter logic: top_n_most_broken_ci_days' do
+      let(:repos_data) do
+        [
+          mock_repo_data(
+            'ci_heavy_broken', ci_broken_days_map: { 'jobA' => 10, 'jobB' => 5 }
+          ),
+          mock_repo_data('ci_light_broken',
+ci_broken_days_map: { 'jobA' => 1 }),
+          mock_repo_data(
+            'ci_medium_broken', ci_broken_days_map: { 'jobA' => 3, 'jobB' => 3 }
+          ),
+        ]
+      end
+      it 'selects based on total broken days across all jobs' do
+        # Expect ci_heavy_broken, ci_medium_broken
+        config.top_n_most_broken_ci_days = 2
+        filtered_names = filter_repositories(repos_data, config)
+                         .map { |r| r[:name] }
+        expect(filtered_names)
+          .to match_array(%w{ci_heavy_broken ci_medium_broken})
+      end
+    end
+
+    context 'specific filter logic: top_n_most_broken_ci_jobs' do
+      let(:repos_data) do
+        [
+          mock_repo_data(
+            'ci_many_jobs', ci_distinct_broken_jobs: %w{j1 j2 j3}
+          ),
+          mock_repo_data(
+            'ci_few_jobs', ci_distinct_broken_jobs: ['j1']
+          ),
+          mock_repo_data(
+            'ci_moderate_jobs', ci_distinct_broken_jobs: %w{j1 j2}
+          ),
+        ]
+      end
+      it 'selects based on number of distinct broken jobs' do
+        # Expect ci_many_jobs, ci_moderate_jobs
+        config.top_n_most_broken_ci_jobs = 2
+        filtered_names = filter_repositories(repos_data, config)
+                         .map { |r| r[:name] }
+        expect(filtered_names).to match_array(%w{ci_many_jobs ci_moderate_jobs})
+      end
+    end
+
+    context 'with missing stats sections' do
+      let(:repo_no_ci) { mock_repo_data('no_ci_stats', stale_pr: 5) }
+      let(:repo_no_pr_issue) do
+        mock_repo_data('no_pr_issue_stats', ci_broken_days_map: { 'j1' => 5 })
+      end
+
+      before do
+        # Simulate missing sections more accurately
+        repo_no_ci[:ci_failures] = nil
+        repo_no_pr_issue[:pr_issue_stats] = nil
+      end
+
+      let(:repos_data) do
+        [
+          repo_no_ci,
+          repo_no_pr_issue,
+          mock_repo_data(
+            'full_stats', stale_pr: 10, ci_broken_days_map: { 'j1' => 10 }
+          ),
+        ]
+      end
+
+      it 'handles missing ci_failures for CI filters' do
+        # Expect 'full_stats' (10 days), then 'no_pr_issue_stats' (5 days).
+        # 'no_ci_stats' effectively has 0.
+        config.top_n_most_broken_ci_days = 1
+        filtered = filter_repositories(repos_data, config)
+        expect(filtered.map { |r| r[:name] }).to eq(['full_stats'])
+      end
+
+      it 'handles missing pr_issue_stats for PR/issue filters' do
+        # Expect 'full_stats' (10 stale), then 'no_ci_stats' (5 stale).
+        # 'no_pr_issue_stats' effectively has 0.
+        config.top_n_stale = 1
+        filtered = filter_repositories(repos_data, config)
+        expect(filtered.map { |r| r[:name] }).to eq(['full_stats'])
+      end
+    end
+
+    context 'specific filter logic: top_n_stale_pr' do
+      let(:repos_data) do
+        [
+          mock_repo_data('r1', stale_pr: 10),
+          mock_repo_data('r2', stale_pr: 5),
+          mock_repo_data('r3', stale_pr: 12),
+        ]
+      end
+      it 'selects based on PR stale count only' do
+        config.top_n_stale_pr = 2
+        expect(filter_repositories(repos_data, config)
+          .map { |r| r[:name] }).to match_array(%w{r3 r1})
+      end
+    end
+
+    context 'specific filter logic: top_n_oldest_pr' do
+      let(:repos_data) do
+        [
+          mock_repo_data('r1', oldest_pr_days: 100),
+          mock_repo_data('r2', oldest_pr_days: 50),
+          mock_repo_data('r3', oldest_pr_days: 120),
+        ]
+      end
+      it 'selects based on PR oldest open days only' do
+        config.top_n_oldest_pr = 2
+        expect(filter_repositories(repos_data, config)
+          .map { |r| r[:name] }).to match_array(%w{r3 r1})
+      end
+    end
+
+    context 'specific filter logic: top_n_time_to_close_pr' do
+      let(:repos_data) do
+        [
+          mock_repo_data('r1', avg_close_pr_hours: 100),
+          mock_repo_data('r2', avg_close_pr_hours: 50),
+          mock_repo_data('r3', avg_close_pr_hours: 120),
+        ]
+      end
+      it 'selects based on PR avg time to close only' do
+        config.top_n_time_to_close_pr = 2
+        expect(filter_repositories(repos_data, config)
+          .map { |r| r[:name] }).to match_array(%w{r3 r1})
+      end
+    end
+
+    context 'specific filter logic: top_n_stale_issue' do
+      let(:repos_data) do
+        [
+          mock_repo_data('r1', stale_issue: 10),
+          mock_repo_data('r2', stale_issue: 5),
+          mock_repo_data('r3', stale_issue: 12),
+        ]
+      end
+
+      it 'selects based on Issue stale count only' do
+        config.top_n_stale_issue = 2
+        expect(filter_repositories(repos_data, config)
+          .map { |r| r[:name] }).to match_array(%w{r3 r1})
+      end
+    end
+
+    context 'specific filter logic: top_n_oldest_issue' do
+      let(:repos_data) do
+        [
+          mock_repo_data('r1', oldest_issue_days: 100),
+          mock_repo_data('r2', oldest_issue_days: 50),
+          mock_repo_data('r3', oldest_issue_days: 120),
+        ]
+      end
+
+      it 'selects based on Issue oldest open days only' do
+        config.top_n_oldest_issue = 2
+        expect(filter_repositories(repos_data, config)
+          .map { |r| r[:name] }).to match_array(%w{r3 r1})
+      end
+    end
+
+    context 'specific filter logic: top_n_time_to_close_issue' do
+      let(:repos_data) do
+        [
+          mock_repo_data('r1', avg_close_issue_hours: 100),
+          mock_repo_data('r2', avg_close_issue_hours: 50),
+          mock_repo_data('r3', avg_close_issue_hours: 120),
+        ]
+      end
+      it 'selects based on Issue avg time to close only' do
+        config.top_n_time_to_close_issue = 2
+        expect(filter_repositories(repos_data, config)
+          .map { |r| r[:name] }).to match_array(%w{r3 r1})
+      end
+    end
+
+    context 'with combinations of general and specific PR/Issue filters' do
+      let(:repos_data) do
+        [
+          # Max stale = 20 (Issue)
+          mock_repo_data('repo_max_stale_high', stale_pr: 1, stale_issue: 20),
+          # PR stale = 15
+          mock_repo_data('repo_pr_stale_high', stale_pr: 15, stale_issue: 1),
+          # Issue stale = 18
+          mock_repo_data('repo_issue_stale_high', stale_pr: 2, stale_issue: 18),
+          mock_repo_data('repo_all_low', stale_pr: 1, stale_issue: 1),
+        ]
+      end
+
+      it 'includes repos meeting general OR specific criteria ' +
+         '(top_n_stale and top_n_stale_pr)' do
+        # Expect repo_max_stale_high (20)
+        config.top_n_stale = 1
+        # Expect repo_pr_stale_high (15)
+        config.top_n_stale_pr = 1
+
+        filtered_names = filter_repositories(repos_data, config)
+                         .map { |r| r[:name] }
+        expect(filtered_names)
+          .to match_array(%w{repo_max_stale_high repo_pr_stale_high})
+      end
+
+      it 'includes repos meeting general OR specific criteria ' +
+         '(top_n_stale and top_n_stale_issue)' do
+        # Expect repo_max_stale_high (20)
+        config.top_n_stale = 1
+        # top issues count is the same
+        config.top_n_stale_issue = 1
+
+        filtered_names = filter_repositories(repos_data, config)
+                         .map { |r| r[:name] }
+        expect(filtered_names).to match_array(%w{repo_max_stale_high})
+      end
+    end
+  end
 end

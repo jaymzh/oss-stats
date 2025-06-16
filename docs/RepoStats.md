@@ -81,3 +81,50 @@ repeatedly. It allows you to specify orgs, repos within those orgs, and
 customize branches to check and days to report on by repo.
 
 See [examples/repo_stats_config.rb](../examples/repo_stats_config.rb) for details.
+
+## Threshold Filtering
+
+When working with a large number of repositories, the output of `repo_stats.rb`
+can become quite verbose. Threshold filtering options allow you to narrow down
+the report to include only the top N or N% of repositories based on specific
+criteria. This helps in identifying areas that might need the most attention.
+
+If multiple threshold options are provided, repositories meeting *any* of the
+specified criteria will be included in the report.
+
+Percentages (`N%`) are calculated based on the total number of repositories
+being processed in the current run. For example, if 20 repositories are being
+processed and `--top-n-stale=10%` is used, the top 2 repositories (10% of 20)
+will be selected for that criterion.
+
+The following threshold filtering options are available:
+
+* `--top-n-stale=N` or `N%`: Includes the top N or N% of repositories based
+  on the *maximum* stale count of either its Pull Requests or Issues (stale
+  is defined as >30 days without a comment). For example, if a repo has 5
+  stale PRs and 10 stale Issues, it's ranked by 10.
+* `--top-n-oldest=N` or `N%`: Includes the top N or N% of repositories with
+  the oldest open item (Pull Request or Issue). The age of the single oldest
+  item (be it a PR or an Issue) in a repository is used for comparison.
+* `--top-n-time-to-close=N` or `N%`: Includes the top N or N% of repositories
+  with the highest average time-to-close. The ranking uses the *higher* of
+  the average time-to-close for Pull Requests or the average time-to-close
+  for Issues within a repository.
+* `--top-n-stale-pr=N` or `N%`: Includes the top N or N% of repositories with
+  the most stale Pull Requests.
+* `--top-n-stale-issue=N` or `N%`: Includes the top N or N% of repositories
+  with the most stale Issues.
+* `--top-n-oldest-pr=N` or `N%`: Includes the top N or N% of repositories
+  with the oldest open Pull Requests.
+* `--top-n-oldest-issue=N` or `N%`: Includes the top N or N% of repositories
+  with the oldest open Issues.
+* `--top-n-time-to-close-pr=N` or `N%`: Includes the top N or N% of
+  repositories with the highest average time-to-close for Pull Requests.
+* `--top-n-time-to-close-issue=N` or `N%`: Includes the top N or N% of
+  repositories with the highest average time-to-close for Issues.
+* `--top-n-most-broken-ci-days=N` or `N%`: Includes the top N or N% of
+  repositories with the highest total number of days CI jobs were reported as
+  broken across all checked branches.
+* `--top-n-most-broken-ci-jobs=N` or `N%`: Includes the top N or N% of
+  repositories with the highest number of distinct CI jobs that were reported
+  as broken across all checked branches.
