@@ -1,0 +1,7 @@
+inherit_gem:
+  oss-stats: .rubocop.yml
+
+AllCops:
+  Exclude:
+    # auto-gen'd bin stubs
+    - ./bin/*

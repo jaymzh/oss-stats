@@ -68,7 +68,7 @@ def update_promise_status(config, date, new_status)
 
   print 'Enter ID to update: '
   chosen_id = gets.strip.to_i
-  if rows.any? { |r| r[0] == chosen_id }
+  if rows.any? { |r| r.first == chosen_id }
     if new_status == 'resolved'
       db.execute(
         "UPDATE promises SET resolved_on = ?, status = 'resolved' " +
@@ -107,7 +107,7 @@ def edit_promise(config)
 
   print 'Enter ID to edit: '
   chosen_id = gets.strip.to_i
-  entry = rows.find { |r| r[0] == chosen_id }
+  entry = rows.find { |r| r.first == chosen_id }
 
   unless entry
     puts 'Invalid ID.'
@@ -197,7 +197,7 @@ def prompt(txt, default = nil)
 end
 
 def main
-  if ARGV.empty? || %w{--help -h}.include?(ARGV[0])
+  if ARGV.empty? || %w{--help -h}.include?(ARGV.first)
     puts <<~HELP
       Usage: #{$PROGRAM_NAME} [subcommand] [options]
 

@@ -3,7 +3,6 @@ require 'date'
 require 'deep_merge'
 require 'octokit'
 require 'optparse'
-require 'set'
 require 'yaml'
 
 require_relative 'buildkite_client'
@@ -149,7 +148,7 @@ module OssStats
       buildkite_badge_regex =
         %r{\)\]\((https://buildkite\.com\/([^\/]+)\/([^\/\)]+))\)}
       matches = readme.scan(buildkite_badge_regex)
-      if matches.length.zero?
+      if matches.empty?
         log.debug('no BK pipelines found in readme')
         return pipelines
       end
@@ -209,7 +208,7 @@ module OssStats
           api_builds = bk_client.get_pipeline_builds(
             pl[:org], pl[:pipeline], from_date, today, branch
           )
-          if api_builds.length.zero?
+          if api_builds.empty?
             log.debug("No builds for #{pl} on #{branch}")
             next
           end
@@ -314,7 +313,7 @@ module OssStats
             log.debug("  Acquiring page #{page}")
             runs = gh_client.workflow_runs(
               repo, workflow.id, branch:, status: 'completed', per_page: 100,
-              page:
+                                 page:
             )
             rate_limited_sleep
 

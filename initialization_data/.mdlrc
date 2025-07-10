@@ -1,1 +1,2 @@
-style '../oss-stats/.mdl_style.rb'
+oss_stats_dir = Gem::Specification.find_by_name('oss-stats').gem_dir
+style "#{oss_stats_dir}/.mdl_style.rb"

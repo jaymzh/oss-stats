@@ -1,13 +1,24 @@
+require_relative 'log'
+
 # looks for :github_token in `options`, falling back to
 # $GITHUB_TOKEN, and then gh's auth.
 def get_github_token(options)
-  return options[:github_token] if options[:github_token]
-  return ENV['GITHUB_TOKEN'] if ENV['GITHUB_TOKEN']
+  if options[:github_token]
+    log.debug('Using GH token from CLI')
+    return options[:github_token]
+  elsif ENV['GITHUB_TOKEN']
+    log.debug('Using GH token from env')
+    return ENV['GITHUB_TOKEN']
+  end
 
   config_path = File.expand_path('~/.config/gh/hosts.yml')
   if File.exist?(config_path)
     config = YAML.load_file(config_path)
-    return config.dig('github.com', 'oauth_token')
+    token = config.dig('github.com', 'oauth_token')
+    if token
+      log.debug('Using GH token from gh cli config')
+      return token
+    end
   end
   nil
 end

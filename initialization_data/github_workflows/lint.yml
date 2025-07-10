@@ -5,11 +5,9 @@ on:
   pull_request:
 
 jobs:
-  ruby:
+  lint:
     strategy:
       fail-fast: false
-      matrix:
-        ruby: [3.1, 3.3]
     runs-on: ubuntu-latest
     steps:
     - name: Install system deps
@@ -18,26 +16,18 @@ jobs:
         sudo apt-get -y install imagemagick libmagickwand-dev
     - name: Checkout repository
       uses: actions/checkout@v2
-      with:
-        path: 'chef-oss-stats'
     - name: Checkout repository
       uses: actions/checkout@v2
-      with:
-        repository: jaymzh/oss-stats
-        path: 'oss-stats'
     - name: Setup Ruby
       uses: ruby/setup-ruby@v1
       with:
-        ruby-version: ${{ matrix.ruby }}
+        ruby-version: '3.4'
     - name: Install ruby dependencies
       run: bundle install
-      working-directory: ./chef-oss-stats
     - name: Run chefstyle
-      run: ../oss-stats/scripts/run_cookstyle.sh
-      working-directory: ./chef-oss-stats
-    # it's a but dumb to run MDL on two versions of ruby
-    # but it's better than re-setting up a container, installing
-    # imagemagic so that we can bundle install...
+      run: |-
+        ./scripts/oss_stats_script.sh run_cookstyle.sh
     - name: Run markdownlint
-      run: ../oss-stats/scripts/run_markdownlint.sh .
-      working-directory: ./chef-oss-stats
+      # Only run MDL on our MDs , not the auto-generated reports
+      run: |-
+        ./scripts/oss_stats_script.sh run_markdownlint.sh $(find . -type f -name \*.md | grep -v _reports)

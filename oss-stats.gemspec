@@ -25,9 +25,19 @@ Gem::Specification.new do |spec|
     Dir.glob('bin/*') +
     Dir.glob('extras/*') +
     Dir.glob('spec/*') +
+    Dir.glob('scripts/*') +
     Dir.glob('initialization_data/*') +
     Dir.glob('initialization_data/github_workflow/s*')
-  %w{sqlite3 octokit mixlib-log mixlib-config gruff deep_merge}.each do |dep|
+  %w{
+    base64
+    deep_merge
+    faraday-retry
+    gruff
+    mixlib-config
+    mixlib-log
+    octokit
+    sqlite3
+  }.each do |dep|
     spec.add_dependency dep
   end
   spec.metadata = {

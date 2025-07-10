@@ -1,1 +1,2 @@
-rule 'MD013', tables: false
+all
+rule 'MD013', tables: false, ignore_code_blocks: true

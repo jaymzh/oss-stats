@@ -257,13 +257,13 @@ def summary(db_file)
   db.close
 
   # TODO: de-dupe this with generate_plots
-  dates = data.map { |row| row[0] }.uniq.reverse
+  dates = data.map(&:first).uniq.reverse
   dates[0..2].each do |date|
-    total_teams = data.count { |row| row[0] == date }
-    present_teams = data.count { |row| row[0] == date && row[2] == 'Y' }
+    total_teams = data.count { |row| row.first == date }
+    present_teams = data.count { |row| row.first == date && row[2] == 'Y' }
     present_pct = ((present_teams / total_teams) * 100).round(2)
     reporting_builds = data.count do |row|
-      row[0] == date && row[3] != 'N' && !row[3].strip.empty?
+      row.first == date && row[3] != 'N' && !row[3].strip.empty?
     end
     reporting_builds_pct =
       ((reporting_builds.to_f / total_teams) * 100).round(2)
@@ -284,15 +284,15 @@ def generate_plots(db_file, img_dir)
   )
   db.close
 
-  dates = data.map { |row| row[0] }.uniq
+  dates = data.map(&:first).uniq
   attendance_percentages = []
   build_status_percentages = []
 
   dates.each do |date|
-    total_teams = data.count { |row| row[0] == date }
-    present_teams = data.count { |row| row[0] == date && row[2] == 'Y' }
+    total_teams = data.count { |row| row.first == date }
+    present_teams = data.count { |row| row.first == date && row[2] == 'Y' }
     reporting_builds = data.count do |row|
-      row[0] == date && row[3] != 'N' && !row[3].strip.empty?
+      row.first == date && row[3] != 'N' && !row[3].strip.empty?
     end
 
     attendance_percentages <<
@@ -307,7 +307,7 @@ def generate_plots(db_file, img_dir)
   }
 
   sizes.each do |name, size|
-    g = Gruff::Line.new(size[0], size[1])
+    g = Gruff::Line.new(size.first, size[1])
     g.maximum_value = 100
     g.minimum_value = 0
     g.title = 'Percentage of Teams Present Over Time'
@@ -315,7 +315,7 @@ def generate_plots(db_file, img_dir)
     g.labels = dates.each_with_index.to_h
     g.write(::File.join(img_dir, "attendance-#{name}.png"))
 
-    g2 = Gruff::Line.new(size[0], size[1])
+    g2 = Gruff::Line.new(size.first, size[1])
     g2.maximum_value = 100
     g2.minimum_value = 0
     g2.title = 'Percentage of Teams Reporting Build Status Over Time'
