@@ -45,7 +45,7 @@ doing anything.
 
 It'll look like:
 
-```bash
+```text
 Welcome to oss-stats!
 
 We'll go ahead and setup this directory to be ready to track your open source
@@ -82,6 +82,18 @@ Then you can also check `promise_stats`, `pipeline_visibility_stats`, and
 
 You can see an example of a downstream repo at
 [chef-oss-stats](https://github.com/jaymzh/chef-oss-stats/).
+
+## Converting from pre-gem versions
+
+If you ran the setup script before it used the gem (and required `../oss-stats`
+to exist), you can convert to the new setup. Make sure your `oss-stats` checkout
+is updated, and then run:
+
+```bash
+../oss-stats/bin/initialize_repo.sh -c
+```
+
+Once you've done that, your `oss-stats` checkout is no longer necessary.
 
 ## Tools in this repo
 
