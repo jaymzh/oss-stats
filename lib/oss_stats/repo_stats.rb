@@ -499,7 +499,7 @@ module OssStats
       end
       log.info(
         "    * Stale #{type} (>30 days without comment): " +
-        stats[:stale_count],
+        stats[:stale_count].to_s,
       )
       avg_time = stats[:avg_time_to_close_hours]
       avg_time_str =
