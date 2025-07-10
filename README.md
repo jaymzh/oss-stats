@@ -15,30 +15,70 @@ various metrics around health of an open source project.
    * [Promises](#promises)
 * [Authentication](#authentication)
 
-## How to use this repo
+## Installation
 
-You'll want to create your own repository to keep the data and results that
-these scripts use and generate about your project.
+You'll want to create your own directory or git repository to keep the data and
+results that these scripts use and generate about your project. Whether or not
+your directory is actually a git repo doesn't matter, but we recommend making
+it one.
 
-Currently docs and tools are all setup for you to keep your repo and this repo
-checked out at the same level and use `oss-stats` directly from git. Once we
-get a release out the door, we'll update this with alternative options.
+In your fresh directory, run this command to set everything up:
 
-This repo has a script that'll do all the required initial work. On your new
-repo, do:
-
-```shell
-<path_to_this_repo>/scripts/intialize_repo.sh
+```bash
+\curl -sSL https://raw.githubusercontent.com/jaymzh/oss-stats/refs/heads/main/bin/initialize_repo.sh | bash -s
 ```
 
-This will:
+You can pass in some options like:
 
-* Generate basic config skeleton files for the various scripts
-* Create necessary directories
-* Setup a GitHub Actions workflow for you
+```bash
+\curl -sSL https://raw.githubusercontent.com/jaymzh/oss-stats/refs/heads/main/bin/initialize_repo.sh | bash -s -- <options>
+```
+
+You can find valid options with `-h`.
+
+This will create a Gemfile that depends on the `git` version of the `oss-stats`
+gem, install the bundle, setup the binstubs in `./bin`, create same config
+files for you, and even setup GitHub Workflows!
 
 You can run it with `-n` (dryrun) to see what it will do without actually
 doing anything.
+
+It'll look like:
+
+```bash
+Welcome to oss-stats!
+
+We'll go ahead and setup this directory to be ready to track your open source
+stats!
+
+➤ Initializing Gemfile to depend on oss-stats
+➤ Installing gem bundle
+➤ Making necessary directories
+➤ Copying basic skeleton files
+➤ Creating initial config files
+➤ Setting up GH Workflows
+
+OK, this directory is setup.
+
+NEXT STEPS:
+
+1. Edit `repo_stats_config.rb` in this directory to add repository to specify
+   what repositories you care about, and change anything else you may be
+   interested in.
+2. Run a sample report with: `./bin/repo_stats.rb`
+
+We recommend running it regularly (e.g. weekly) and storing the output in the
+repo_reports directory we've created, ala:
+
+  date=$(date '+%Y-%m-%d')
+  out="repo_reports/${date}.md"
+  for repo in $repos; do
+    ./bin/repo_stats.rb >> $out
+  done
+
+Then you can also check `promise_stats`, `pipeline_visibility_stats`, and
+`meeting_stats`.
+```
 
 You can see an example of a downstream repo at
 [chef-oss-stats](https://github.com/jaymzh/chef-oss-stats/).

@@ -18,32 +18,60 @@ include_list false
 # is the organizations block. It allows you to specify
 # all of the repos that will be processed and how
 # they should be processed
-organizations({
-  'someorg' => {
-    # if this org uses different branches (can further override under the repo)
-    'branches' => ['trunk'],
-    # if you want a different number of days by for repos in this org (can
-    # further override under the repo)
-    'days' => 7,
-    'repositories' => {
-      'repo1' => {},
-      'repo2' => {
-        # crazy repo, only do 2 days
-        'days' => 2,
-        'branches' => ['main'],
+organizations(
+  {
+    'someorg' => {
+      # if this org uses different branches
+      # (can further override under the repo)
+      'branches' => ['trunk'],
+      # if you want a different number of days by for repos in this org (can
+      # further override under the repo)
+      'days' => 7,
+      'repositories' => {
+        'repo1' => {},
+        'repo2' => {
+          # crazy repo, only do 2 days
+          'days' => 2,
+          'branches' => ['main'],
+        },
+        'repo3' => {
+          'days' => 30,
+          'branches' => ['main'],
+        },
       },
-      'repo3' => {
-        'days' => 30,
-        'branches' => ['main'],
-      }
-  },
-  'anotherorg' => {
-    'days' => 45,
-    'branches' => %w{main oldstuff},
-    'repositories' => {
-      'repo1' => {},
-      'repo2' => {},
-      'repo3' => {},
+    },
+    'anotherorg' => {
+      'days' => 45,
+      'branches' => %w{main oldstuff},
+      'repositories' => {
+        'repo1' => {},
+        'repo2' => {},
+        'repo3' => {},
+      },
     },
   },
-})
+)
+
+# limit output to only repos in the top-N trouble-makers along various
+# axes
+#
+# All of these except "N" or "N%" (3 repos, or 3% or repos, for example)
+
+# top_n_stale 3
+#  OR
+# top_n_stale_pr 3
+# top_n_stale_issue 3
+#
+# top_n_oldest 3
+#  OR
+# top_n_oldest_pr 3
+# top_n_oldest_issue 3
+#
+# top_n_time_to_close 3
+#  OR
+# top_n_time_to_close_pr 3
+# top_n_time_to_close_issue 3
+#
+# top_n_most_broken_ci_days 3
+#
+# top_n_most_broken_ci_jobs 3

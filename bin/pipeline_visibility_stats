@@ -6,7 +6,6 @@ require 'json'
 require 'mixlib/shellout'
 require 'net/http'
 require 'optparse'
-require 'set'
 require 'uri'
 require 'yaml'
 
@@ -254,11 +253,10 @@ def process_buildkite_pipelines(
     total_pipeline_count += 1
     next if visibility.casecmp('public').zero?
 
-    if reported_slugs.add?(report_key)
-      log.debug("Pipeline #{report_key} is #{visibility} (direct)")
-      repo_missing_public << slug
-      private_pipeline_count += 1
-    end
+    next unless reported_slugs.add?(report_key)
+    log.debug("Pipeline #{report_key} is #{visibility} (direct)")
+    repo_missing_public << slug
+    private_pipeline_count += 1
   end
 
   # However, more likely, we don't have access to see the pipeline or

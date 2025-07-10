@@ -13,7 +13,7 @@ jobs:
     - name: Install system deps
       run: |
         sudo apt-get update
-        sudo apt-get -y install imagemagick libmagickwand-dev
+        sudo apt-get -y install imagemagick libmagickwand-dev shellcheck
     - name: Checkout repository
       uses: actions/checkout@v2
     - name: Setup Ruby
@@ -29,3 +29,5 @@ jobs:
     # imagemagic so that we can bundle install...
     - name: Run markdownlint
       run: ./scripts/run_markdownlint.sh .
+    - name: Run shellcheck 
+      run: ./scripts/run_shellcheck.sh

@@ -108,8 +108,8 @@ RSpec.describe 'repo_stats' do
                                        .and_return(double(content: ''))
       allow(client).to receive(:workflows).and_return(
         double(workflows: [
-          double(id: 1, name: 'Test Workflow', html_url: 'testurl'),
-        ]),
+                 double(id: 1, name: 'Test Workflow', html_url: 'testurl'),
+               ]),
       )
       allow(client).to receive(:workflow_runs).with(
         'test_org/test_repo',
@@ -127,8 +127,8 @@ RSpec.describe 'repo_stats' do
       ).and_return(double(workflow_runs: []))
       allow(client).to receive(:workflow_run_jobs).and_return(
         double(jobs: [
-            double(name: 'Test Job', conclusion: 'failure'),
-        ]),
+                 double(name: 'Test Job', conclusion: 'failure'),
+               ]),
       )
 
       failed_tests = get_failed_tests_from_ci(client, nil, options, {})
@@ -205,15 +205,15 @@ RSpec.describe 'repo_stats' do
           expect(mock_buildkite_client).to receive(:get_pipeline)
             .with('test-buildkite-org', 'actual-pipeline-name')
             .and_return({
-              url: 'testurl',
-              slug: 'actual-pipeline-name',
-            })
+                          url: 'testurl',
+                          slug: 'actual-pipeline-name',
+                        })
           expect(mock_buildkite_client).to receive(:get_pipeline)
             .with('other-org', 'other-pipeline')
             .and_return({
-              url: 'testurl',
-              slug: 'other-pipeline',
-            })
+                          url: 'testurl',
+                          slug: 'other-pipeline',
+                        })
           expect(mock_buildkite_client).to receive(:get_pipeline_builds)
             .with(
               'test-buildkite-org',
@@ -222,13 +222,15 @@ RSpec.describe 'repo_stats' do
               Date.today,
               'main',
             )
-            .and_return([
-              {
-                'node' => {
-                  'createdAt' => (Date.today - 1).to_s, 'state' => 'FAILED'
+            .and_return(
+              [
+                {
+                  'node' => {
+                    'createdAt' => (Date.today - 1).to_s, 'state' => 'FAILED'
+                  },
                 },
-              },
-            ])
+              ],
+            )
           expect(mock_buildkite_client).to receive(:get_pipeline_builds)
             .with(
               'other-org',
@@ -237,13 +239,15 @@ RSpec.describe 'repo_stats' do
               Date.today,
               'main',
             )
-            .and_return([
-              {
-                'node' => {
-                  'createdAt' => (Date.today - 1).to_s, 'state' => 'PASSED'
+            .and_return(
+              [
+                {
+                  'node' => {
+                    'createdAt' => (Date.today - 1).to_s, 'state' => 'PASSED'
+                  },
                 },
-              },
-            ])
+              ],
+            )
           failed_tests = get_failed_tests_from_ci(
             client, mock_buildkite_client, settings_with_buildkite_token, {}
           )
@@ -256,9 +260,9 @@ RSpec.describe 'repo_stats' do
           expect(mock_buildkite_client).to receive(:get_pipeline)
             .with('test-buildkite-org', 'another-actual-pipeline')
             .and_return({
-              url: 'testurl',
-              slug: 'another-actual-pipelinename',
-            })
+                          url: 'testurl',
+                          slug: 'another-actual-pipelinename',
+                        })
           allow(client).to receive(:readme)
             .with(repo_full_name)
             .and_return(
@@ -282,24 +286,24 @@ RSpec.describe 'repo_stats' do
           expect(mock_buildkite_client).to receive(:get_pipeline)
             .with('test-buildkite-org', 'actual-pipeline-name')
             .and_return({
-              url: 'testurl',
-              slug: 'actual-pipeline-name',
-            })
+                          url: 'testurl',
+                          slug: 'actual-pipeline-name',
+                        })
           expect(mock_buildkite_client).to receive(:get_pipeline)
             .with('other-org', 'other-pipeline')
             .and_return({
-              url: 'testurl',
-              slug: 'other-pipeline',
-            })
+                          url: 'testurl',
+                          slug: 'other-pipeline',
+                        })
           allow(mock_buildkite_client).to receive(:get_pipeline_builds)
             .and_return([
-              {
-                'node' => {
-                  'createdAt' => (Date.today - 1).to_s,
-                  'state' => 'PASSED',
-                },
-              },
-            ])
+                          {
+                            'node' => {
+                              'createdAt' => (Date.today - 1).to_s,
+                              'state' => 'PASSED',
+                            },
+                          },
+                        ])
           failed_tests = get_failed_tests_from_ci(
             client, mock_buildkite_client, settings_with_buildkite_token, {}
           )
@@ -340,15 +344,15 @@ RSpec.describe 'repo_stats' do
             expect(mock_buildkite_client).to receive(:get_pipeline)
               .with('test-buildkite-org', 'actual-pipeline-name')
               .and_return({
-                url: 'testurl',
-                slug: 'actual-pipeline-name',
-              })
+                            url: 'testurl',
+                            slug: 'actual-pipeline-name',
+                          })
             expect(mock_buildkite_client).to receive(:get_pipeline)
               .with('other-org', 'other-pipeline')
               .and_return({
-                url: 'testurl',
-                slug: 'other-pipeline',
-              })
+                            url: 'testurl',
+                            slug: 'other-pipeline',
+                          })
             allow(mock_buildkite_client).to receive(:get_pipeline_builds)
               .with(
                 org_name, pipeline_name, today - days_to_check, today, 'main'
@@ -359,15 +363,17 @@ RSpec.describe 'repo_stats' do
               client, mock_buildkite_client, options_for_ongoing, {}
             )
 
-            expected_job_dates = Set.new([
-              today - days_to_check + 1,
-              today - days_to_check + 2,
-              # no 3, it passed that day
-              today - days_to_check + 4,
-              # add today (days_to_check = 5), becuase we fill in
-              # all days through today if the last check is failing
-              today,
-            ])
+            expected_job_dates = Set.new(
+              [
+                today - days_to_check + 1,
+                today - days_to_check + 2,
+                # no 3, it passed that day
+                today - days_to_check + 4,
+                # add today (days_to_check = 5), becuase we fill in
+                # all days through today if the last check is failing
+                today,
+              ],
+            )
             expect(failed_tests['main'][job_key][:dates])
               .to eq(expected_job_dates)
             expect(failed_tests['main'][job_key][:dates].size)
@@ -417,9 +423,9 @@ RSpec.describe 'repo_stats' do
           allow(mock_buildkite_client)
             .to receive(:get_pipeline)
             .and_return({
-              url: 'testurl',
-              slug: 'actual-pipeline-name',
-            })
+                          url: 'testurl',
+                          slug: 'actual-pipeline-name',
+                        })
         end
 
         it 'handles the error gracefully and logs it' do
@@ -593,26 +599,28 @@ RSpec.describe 'repo_stats' do
 
   describe '#determine_orgs_to_process' do
     before(:each) do
-      OssStats::Config::RepoStats.organizations({
-        'org1' => {
-          'days' => 2,
-          'repositories' => {
-            'repo1' => {},
-            'repo2' => {
-              'days' => 3,
+      OssStats::Config::RepoStats.organizations(
+        {
+          'org1' => {
+            'days' => 2,
+            'repositories' => {
+              'repo1' => {},
+              'repo2' => {
+                'days' => 3,
+              },
+            },
+          },
+          'org2' => {
+            'days' => 7,
+            'repositories' => {
+              'repoA' => {
+                'days' => 30,
+              },
+              'repoB' => {},
             },
           },
         },
-        'org2' => {
-          'days' => 7,
-          'repositories' => {
-            'repoA' => {
-              'days' => 30,
-            },
-            'repoB' => {},
-          },
-        },
-      })
+      )
     end
     let(:config) { OssStats::Config::RepoStats }
 
@@ -1007,7 +1015,7 @@ ci_broken_days_map: { 'main_job' => 100 }),
           ),
           mock_repo_data(
             'repo_issue_slow', avg_close_pr_hours: 10,
-            avg_close_issue_hours: 100
+                               avg_close_issue_hours: 100
           ),
           mock_repo_data(
             'repo_both_fast', avg_close_pr_hours: 5, avg_close_issue_hours: 5
