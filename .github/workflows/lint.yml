@@ -29,5 +29,5 @@ jobs:
     # imagemagic so that we can bundle install...
     - name: Run markdownlint
       run: ./scripts/run_markdownlint.sh .
-    - name: Run shellcheck 
+    - name: Run shellcheck
       run: ./scripts/run_shellcheck.sh
