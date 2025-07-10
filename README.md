@@ -7,7 +7,8 @@
 This is a collection of tools that aim to make it easier to track and report
 various metrics around health of an open source project.
 
-* [How to use this repo](#how-to-use-this-repo)
+* [Installation](#installation)
+   * [Converting from pre-gem verions](#converting-from-pre-gem-versions)
 * [Tools in this repo](#tools-in-this-repo)
    * [Repo Stats](#repo-stats)
    * [Pipeline Visibility Stats](#pipeline-visibility-stats)
@@ -83,7 +84,7 @@ Then you can also check `promise_stats`, `pipeline_visibility_stats`, and
 You can see an example of a downstream repo at
 [chef-oss-stats](https://github.com/jaymzh/chef-oss-stats/).
 
-## Converting from pre-gem versions
+### Converting from pre-gem versions
 
 If you ran the setup script before it used the gem (and required `../oss-stats`
 to exist), you can convert to the new setup. Make sure your `oss-stats` checkout
