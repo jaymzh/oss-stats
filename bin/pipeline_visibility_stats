@@ -631,4 +631,4 @@ options[:make_prs_for].uniq!
 
 raise ArgumentError, 'GitHub org is required' unless options[:github_org]
 
-main(options) if __FILE__ == $PROGRAM_NAME
+main(options)
