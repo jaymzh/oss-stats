@@ -51,9 +51,10 @@ def prompt_team_or_q(teams)
   loop do
     log.info("Choose a team that was present:\n")
     (teams + ['<Other>']).each_with_index do |team, idx|
-      log.info("\t[#{idx}] #{team}")
+      log.info("  [#{idx}] #{team}")
     end
-    log.info("\t[q] <quit>")
+    log.info('  [q] <quit>')
+    print "\nTeam?> "
     response = gets.strip.downcase
     return false if response == 'q'
     begin
@@ -85,11 +86,15 @@ def collect_team_data(meeting_date)
     team = prompt_team_or_q(teams)
     unless team
       missing_teams = teams - team_data.keys
-      log.info(
-        'The following teams will be recorded as not present: ' +
-           missing_teams.join(', '),
-      )
-      if prompt_yes_no('Is that correct?')
+      confirm = true
+      unless missing_teams.empty?
+        log.info(
+          'The following teams will be recorded as not present: ' +
+             missing_teams.join(', '),
+        )
+        confirm = prompt_yes_no('Is that correct?')
+      end
+      if confirm
         missing_teams.each do |mt|
           team_data[mt] = {
             'present' => false,
@@ -114,17 +119,19 @@ def collect_team_data(meeting_date)
     end
 
     log.info("\nTeam: #{team}")
+    log.info('  -> Marking team as present')
     team_data[team] = {}
     team_data[team]['present'] = true
     team_data[team]['current_work'] = prompt_yes_no(
-      'Did they discuss current work?',
+      '  -> Did they discuss current work?',
     )
-    print "Enter build status (e.g. green, red, or 'main:green, 18:red'): "
+    log.info('  -> Enter build status (leave empty if they didn\'t say)')
+    print "     (e.g. empty, 'green', 'red', or 'main:green, 18:red'): "
     build_status = gets.strip
     team_data[team]['build_status'] = build_status
     fix_pointers = if build_status.include?('red')
                      if prompt_yes_no(
-                       'Did they point to work to fix the build?',
+                       '  ----> Did they point to work to fix the build?',
                      )
                        'Y'
                      else
@@ -135,9 +142,9 @@ def collect_team_data(meeting_date)
                    end
     team_data[team]['fix_pointers'] = fix_pointers
     extra = []
-    merged_prs = prompt_yes_no('Did they list merged PRs that week?')
+    merged_prs = prompt_yes_no('  -> Did they list merged PRs that week?')
     extra << 'listed merged PRs' if merged_prs
-    print 'Any extra notes? (leave empty if none): '
+    print '  -> Any extra notes? (leave empty if none): '
     extra_notes = gets.strip
     extra << extra_notes unless extra_notes.empty?
     team_data[team]['extra'] = if extra.empty?
@@ -145,6 +152,7 @@ def collect_team_data(meeting_date)
                                else
                                  extra.join(', ')
                                end
+    log.info
   end
   team_data.map do |team, info|
     [
