@@ -223,13 +223,17 @@ module OssStats
           # rubocop:enable Style/MultilineBlockChain
 
           last_failure_date_bk = {}
+          # track the most recent seen state/time so we have "current/lastest"
+          # status
+          latest_info = {}
 
           sorted_builds.each do |build_edge|
             build = build_edge['node']
             id = build['id']
             log.debug("Build #{id} for #{pl}")
             begin
-              build_date = DateTime.parse(build['createdAt']).to_date
+              created_dt = DateTime.parse(build['createdAt'])
+              build_date = created_dt.to_date
             rescue ArgumentError, TypeError
               log.warn(
                 "Invalid createdAt date for build in #{pl}: " +
@@ -248,16 +252,42 @@ module OssStats
               log.debug('no build state, skipping')
               next
             end
+
             job_key = "[BK] #{pl[:org]}/#{pl[:pipeline]}"
+
+            cur = latest_info[job_key]
+            if cur.nil? || created_dt > cur[:latest_checked_at]
+              latest_info[job_key] = {
+                latest_status: build['state'],
+                latest_checked_at: created_dt,
+                url: pl[:url],
+              }
+            end
 
             if build['state'] == 'FAILED'
               # we link to the pipeline, not the specific build
               failed_tests[branch][job_key] ||= {
-                url: pl[:url], dates: Set.new
+                url: pl[:url],
+                dates: Set.new,
+                latest_status: nil,
+                latest_checked_at: nil,
               }
               failed_tests[branch][job_key][:dates] << build_date
               log.debug("Marking #{job_key} as failed (#{id} on #{build_date})")
               last_failure_date_bk[job_key] = build_date
+
+              # ensure latest_status reflects the most recent seen info
+              info = latest_info[job_key]
+              if info && (
+                failed_tests[branch][job_key][:latest_checked_at].nil? ||
+                info[:latest_checked_at] >
+                  failed_tests[branch][job_key][:latest_checked_at]
+              )
+                failed_tests[branch][job_key][:latest_status] =
+                  info[:latest_status]
+                failed_tests[branch][job_key][:latest_checked_at] =
+                  info[:latest_checked_at]
+              end
             elsif build['state'] == 'PASSED'
               # If a job passes, and it had a recorded failure on or before this
               # build's date, clear it from ongoing failures.
@@ -273,6 +303,20 @@ module OssStats
                   " (#{id} on #{build_date})",
                 )
               end
+
+              # If we already have a job entry for this job_key (because there
+              # were failures earlier in the window), update its latest_status
+              if failed_tests[branch].key?(job_key)
+                info = latest_info[job_key]
+                job_data = failed_tests[branch][job_key]
+                if info && (
+                  job_data[:latest_checked_at].nil? ||
+                  info[:latest_checked_at] > job_data[:latest_checked_at]
+                )
+                  job_data[:latest_status] = info[:latest_status]
+                  job_data[:latest_checked_at] = info[:latest_checked_at]
+                end
+              end
             else
               log.debug("State is #{build['state']}, ignoring")
             end
@@ -281,6 +325,27 @@ module OssStats
           # Propagate ongoing failures: if a job failed and didn't pass later,
           # mark all subsequent days until today as failed.
           last_failure_date_bk.each do |job_key, last_fail_date|
+            # For every job in which we recorded a failure, make sure we have
+            # a job data
+            failed_tests[branch][job_key] ||= {
+              url: pl[:url],
+              dates: Set.new,
+              latest_status: nil,
+              latest_checked_at: nil,
+            }
+
+            # if we have latest_info, ensure the joab data carries the most
+            # recent status
+            if latest_info[job_key]
+              info = latest_info[job_key]
+              job_data = failed_tests[branch][job_key]
+              if job_data[:latest_checked_at].nil? ||
+                 info[:latest_checked_at] > job_data[:latest_checked_at]
+                job_data[:latest_status] = info[:latest_status]
+                job_data[:latest_checked_at] = info[:latest_checked_at]
+              end
+            end
+
             (last_fail_date + 1..today).each do |date|
               failed_tests[branch][job_key][:dates] << date
             end
@@ -326,6 +391,11 @@ module OssStats
             page += 1
           end
 
+          # We will record the most recent status/time we see per job_key so
+          # that when/if we create a failed_tests entry we can attach the
+          # current status.
+          latest_info = {}
+
           workflow_runs.sort_by!(&:created_at).reverse!
           last_failure_date = {}
           workflow_runs.each do |run|
@@ -339,24 +409,52 @@ module OssStats
             jobs.each do |job|
               log.debug("    Looking at job #{job.name} [#{job.conclusion}]")
               job_name_key = "#{workflow.name} / #{job.name}"
+
+              # we want to link to the _workflow_ on the relevant branch.
+              # If we link to a job, it's only on that given run, which
+              # isn't relevant to our reports, we want people to go see
+              # the current status and all the passes and failures.
+              #
+              # However, the link to the workflow is to the file that defines
+              # it, which is not what we want, but it's easy to munge.
+              url = workflow.html_url.gsub("blob/#{branch}", 'actions')
+              url << "?query=branch%3A#{branch}"
+
+              # Keep most-recent seen status/time for this job_key
+              created_dt = run.created_at.to_datetime
+              cur = latest_info[job_name_key]
+              if cur.nil? || created_dt > cur[:latest_checked_at]
+                latest_info[job_name_key] = {
+                  latest_status: job.conclusion,
+                  latest_checked_at: created_dt,
+                  url: url,
+                }
+              end
+
               if job.conclusion == 'failure'
                 log.debug("Marking #{job_name_key} as failed (#{run_date})")
-                # we want to link to the _workflow_ on the relevant branch.
-                # If we link to a job, it's only on that given run, which
-                # isn't relevant to our reports, we want people to go see
-                # the current status and all the passes and failures.
-                #
-                # However, the link to the workflow is to the file that defines
-                # it, which is not what we want, but it's easy to munge.
-                url = workflow.html_url.gsub("blob/#{branch}", 'actions')
-                url << "?query=branch%3A#{branch}"
                 failed_tests[branch][job_name_key] ||= {
                   # link to the workflow, not this specific run
                   url:,
                   dates: Set.new,
+                  latest_status: nil,
+                  latest_checked_at: nil,
                 }
                 failed_tests[branch][job_name_key][:dates] << run_date
                 last_failure_date[job_name_key] = run_date
+
+                # ensure latest_status reflects the most recent seen info
+                info = latest_info[job_name_key]
+                if info && (
+                  failed_tests[branch][job_name_key][:latest_checked_at].nil? ||
+                  info[:latest_checked_at] >
+                    failed_tests[branch][job_name_key][:latest_checked_at]
+                )
+                  failed_tests[branch][job_name_key][:latest_status] =
+                    info[:latest_status]
+                  failed_tests[branch][job_name_key][:latest_checked_at] =
+                    info[:latest_checked_at]
+                end
               elsif job.conclusion == 'success'
                 if last_failure_date[job_name_key] &&
                    last_failure_date[job_name_key] <= run_date
@@ -368,10 +466,44 @@ module OssStats
                     "(#{run_date})",
                   )
                 end
+
+                # If we already have a job entry because of earlier failures in
+                # the window, update its latest_status from latest_info.
+                if failed_tests[branch].key?(job_name_key)
+                  info = latest_info[job_name_key]
+                  job_data = failed_tests[branch][job_name_key]
+                  if info && (
+                      job_data[:latest_checked_at].nil? ||
+                      info[:latest_checked_at] > job_data[:latest_checked_at]
+                    )
+                    job_data[:latest_status] = info[:latest_status]
+                    job_data[:latest_checked_at] = info[:latest_checked_at]
+                  end
+                end
               end
             end
           end
           last_failure_date.each do |job_key, last_fail_date|
+            # ensure we have job_data (should exist because last_failure_date is
+            # only set when we recorded a failure), but be defensive.
+            failed_tests[branch][job_key] ||= {
+              url: latest_info.dig(job_key, :url) || workflow.html_url,
+              dates: Set.new,
+              latest_status: nil,
+              latest_checked_at: nil,
+            }
+            # If we have latest_info, ensure job_data carries the most recent
+            # status
+            if latest_info[job_key]
+              info = latest_info[job_key]
+              job_data = failed_tests[branch][job_key]
+              if job_data[:latest_checked_at].nil? ||
+                 info[:latest_checked_at] > job_data[:latest_checked_at]
+                job_data[:latest_status] = info[:latest_status]
+                job_data[:latest_checked_at] = info[:latest_checked_at]
+              end
+            end
+
             (last_fail_date + 1..today).each do |date|
               failed_tests[branch][job_key][:dates] << date
             end
@@ -524,12 +656,15 @@ module OssStats
         else
           log.info(line + ' has the following failures:')
           jobs.sort.each do |job_name, job_data|
+            tail = "(latest: #{job_data[:latest_status]})"
             if OssStats::Config::RepoStats.no_links
-              log.info("        * #{job_name}: #{job_data[:dates].size} days")
+              log.info(
+                "        * #{job_name}: #{job_data[:dates].size} days #{tail}",
+              )
             else
               log.info(
                 "        * [#{job_name}](#{job_data[:url]}):" +
-                " #{job_data[:dates].size} days",
+                " #{job_data[:dates].size} days #{tail}",
               )
             end
           end

@@ -462,10 +462,12 @@ RSpec.describe 'repo_stats' do
             'GH Workflow / Job A' => {
               dates: Set[Date.today, Date.today - 1],
               url: 'testurla',
+              latest_status: 'failure',
             },
             'GH Workflow / Job B' => {
               dates: Set[Date.today],
               url: 'testurlb',
+              latest_status: 'success',
             },
           },
         }
@@ -477,9 +479,15 @@ RSpec.describe 'repo_stats' do
         expect(OssStats::Log).to receive(:info)
           .with('    * Branch: `main` has the following failures:')
         expect(OssStats::Log).to receive(:info)
-          .with('        * [GH Workflow / Job A](testurla): 2 days')
+          .with(
+            '        * [GH Workflow / Job A](testurla): 2 days' +
+            ' (latest: failure)',
+          )
         expect(OssStats::Log).to receive(:info)
-          .with('        * [GH Workflow / Job B](testurlb): 1 days')
+          .with(
+            '        * [GH Workflow / Job B](testurlb): 1 days' +
+            ' (latest: success)',
+          )
         print_ci_status(test_failures)
       end
     end
@@ -491,10 +499,12 @@ RSpec.describe 'repo_stats' do
             '[BK] org/pipe1' => {
               dates: Set[Date.today],
               url: 'testurl1',
+              latest_status: 'failure',
             },
             '[BK] org/pipe2' => {
               dates: Set[Date.today, Date.today - 1, Date.today - 2],
               url: 'testurl2',
+              latest_status: 'success',
             },
           },
         }
@@ -506,9 +516,15 @@ RSpec.describe 'repo_stats' do
         expect(OssStats::Log).to receive(:info)
           .with('    * Branch: `main` has the following failures:')
         expect(OssStats::Log).to receive(:info)
-          .with('        * [[BK] org/pipe1](testurl1): 1 days')
+          .with(
+            '        * [[BK] org/pipe1](testurl1): 1 days' +
+            ' (latest: failure)',
+          )
         expect(OssStats::Log).to receive(:info)
-          .with('        * [[BK] org/pipe2](testurl2): 3 days')
+          .with(
+            '        * [[BK] org/pipe2](testurl2): 3 days' +
+            ' (latest: success)',
+          )
         print_ci_status(test_failures)
       end
     end
@@ -520,14 +536,17 @@ RSpec.describe 'repo_stats' do
             'GH Workflow / Job A' => {
               dates: Set[Date.today],
               url: 'testurla',
+              latest_status: 'failure',
             },
             'Buildkite / org/pipe / Job X' => {
               dates: Set[Date.today - 1],
               url: 'testurlx',
+              latest_status: 'failure',
             },
             'GH Workflow / Job C' => {
               dates: Set[Date.today - 2, Date.today - 3],
               url: 'testurlc',
+              latest_status: 'success',
             },
           },
         }
@@ -540,12 +559,20 @@ RSpec.describe 'repo_stats' do
           .with('    * Branch: `main` has the following failures:')
         # Sorted order: Buildkite job first, then GH jobs
         expect(OssStats::Log).to receive(:info)
-          .with('        * [Buildkite / org/pipe / Job X](testurlx): 1 days')
-          .ordered
+          .with(
+            '        * [Buildkite / org/pipe / Job X](testurlx): 1 days' +
+            ' (latest: failure)',
+          ).ordered
         expect(OssStats::Log).to receive(:info)
-          .with('        * [GH Workflow / Job A](testurla): 1 days').ordered
+          .with(
+            '        * [GH Workflow / Job A](testurla): 1 days' +
+            ' (latest: failure)',
+          ).ordered
         expect(OssStats::Log).to receive(:info)
-          .with('        * [GH Workflow / Job C](testurlc): 2 days').ordered
+          .with(
+            '        * [GH Workflow / Job C](testurlc): 2 days' +
+            ' (latest: success)',
+          ).ordered
         print_ci_status(test_failures)
       end
     end
@@ -569,12 +596,14 @@ RSpec.describe 'repo_stats' do
             'GH Workflow / Job A' => {
               dates: Set[Date.today],
               url: 'testurla',
+              latest_status: 'failure',
             },
           },
           'develop' => {
             '[BK] org/pipe' => {
               dates: Set[Date.today - 1, Date.today - 2],
               url: 'testurlp',
+              latest_status: 'success',
             },
           },
         }
@@ -584,13 +613,19 @@ RSpec.describe 'repo_stats' do
         expect(OssStats::Log).to receive(:info)
           .with("\n* CI Stats:")
         expect(OssStats::Log).to receive(:info)
-          .with('    * Branch: `develop` has the following failures:')
-        expect(OssStats::Log).to receive(:info)
-          .with('        * [[BK] org/pipe](testurlp): 2 days')
-        expect(OssStats::Log).to receive(:info)
           .with('    * Branch: `main` has the following failures:')
         expect(OssStats::Log).to receive(:info)
-          .with('        * [GH Workflow / Job A](testurla): 1 days')
+          .with(
+            '        * [GH Workflow / Job A](testurla): 1 days' +
+            ' (latest: failure)',
+          )
+        expect(OssStats::Log).to receive(:info)
+          .with('    * Branch: `develop` has the following failures:')
+        expect(OssStats::Log).to receive(:info)
+          .with(
+            '        * [[BK] org/pipe](testurlp): 2 days' +
+            ' (latest: success)',
+          )
 
         print_ci_status(test_failures)
       end
