@@ -19,6 +19,11 @@ various metrics around health of an open source project.
 
 ## Installation
 
+First, install the pre-reqs:
+
+* Debian/Ubuntu: `sudo apt-get -y install imagemagick libmagickwand-dev`
+* Fedora/Redhat: `sudo dnf install ImageMagick`
+
 You'll want to create your own directory or git repository to keep the data and
 results that these scripts use and generate about your project. Whether or not
 your directory is actually a git repo doesn't matter, but we recommend making
@@ -84,6 +89,8 @@ Then you can also check `promise_stats`, `pipeline_visibility_stats`, and
 
 You can see an example of a downstream repo at
 [chef-oss-stats](https://github.com/jaymzh/chef-oss-stats/).
+
+You'll want to regularly do a `bundle update` to pull in the latest updates.
 
 ### Converting from pre-gem versions
 
