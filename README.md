@@ -23,6 +23,7 @@ First, install the pre-reqs:
 
 * Debian/Ubuntu: `sudo apt-get -y install imagemagick libmagickwand-dev`
 * Fedora/Redhat: `sudo dnf install ImageMagick`
+* Mac/Homebrew: `brew install imagemagick`
 
 You'll want to create your own directory or git repository to keep the data and
 results that these scripts use and generate about your project. Whether or not
