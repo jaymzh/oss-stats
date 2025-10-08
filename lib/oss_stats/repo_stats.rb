@@ -16,11 +16,66 @@ module OssStats
     def rate_limited_sleep
       limit_gh_ops_per_minute =
         OssStats::Config::RepoStats.limit_gh_ops_per_minute
-      if limit_gh_ops_per_minute&.positive?
-        sleep_time = 60.0 / limit_gh_ops_per_minute
-        log.debug("Sleeping for #{sleep_time.round(2)}s to honor rate-limit")
-        sleep(sleep_time)
+      return unless limit_gh_ops_per_minute&.positive?
+
+      sleep_time = 60.0 / limit_gh_ops_per_minute
+      log.debug("Sleeping for #{sleep_time.round(2)}s to honor rate-limit")
+      sleep(sleep_time)
+    end
+
+    def handle_pr_or_issue(
+      item, pr_stats, issue_stats, prs, issues, stale_cutoff, cutoff_date
+    )
+      created_date = item.created_at.to_date
+      closed_date = item.closed_at&.to_date
+      is_pr = !item.pull_request.nil?
+      last_comment_date = item.updated_at.to_date
+      labels = item.labels.map(&:name)
+      days_open = (Date.today - created_date).to_i
+      days_since_last_activity = (Date.today - last_comment_date).to_i
+
+      log.debug(
+        "Checking item: #{is_pr ? 'PR' : 'Issue'}, " +
+        "Created at #{created_date}, Closed at #{closed_date || 'N/A'}",
+      )
+
+      stats = is_pr ? pr_stats : issue_stats
+      list = is_pr ? prs : issues
+
+      # we count open as open and not waiting on contributor
+      if closed_date.nil? &&
+         !labels.include?('Status: Waiting on Contributor')
+        if stats[:oldest_open].nil? || created_date < stats[:oldest_open]
+          stats[:oldest_open] = created_date
+          stats[:oldest_open_days] = days_open
+          stats[:oldest_open_last_activity] = days_since_last_activity
+        end
+
+        stats[:stale_count] += 1 if last_comment_date < stale_cutoff
+        stats[:open] += 1
+        # Count those opened recently separately
+        if created_date >= cutoff_date
+          stats[:opened_this_period] += 1
+          list[:open] << item
+        end
       end
+
+      # Only count as closed if it was actually closed within the cutoff
+      # window
+      return unless closed_date && closed_date >= cutoff_date
+
+      # Only count this PR/Issue as closed depending on settings.
+      if is_pr && !OssStats::Config::RepoStats.count_unmerged_prs &&
+         !(item.pull_request && item.pull_request.merged_at)
+        return
+      end
+
+      # anything closed this week counts as closed regardless of when it
+      # was opened
+      list[:closed] << item
+      stats[:closed] += 1
+      stats[:total_close_time] +=
+        (item.closed_at - item.created_at) / 3600.0
     end
 
     # Fetches and processes Pull Request and Issue statistics for a given
@@ -58,75 +113,56 @@ module OssStats
       prs = { open: [], closed: [] }
       issues = { open: [], closed: [] }
       stale_cutoff = Date.today - 30
+      # First, fetch open items only (so counting open PRs doesn't require
+      # scanning all historical closed issues).
       page = 1
-
       loop do
-        items = gh_client.issues(repo, state: 'all', per_page: 100, page:)
+        items = gh_client.issues(
+          repo,
+          state: 'open',
+          per_page: 100,
+          page:,
+          sort: 'created',
+          direction: 'desc',
+        )
         break if items.empty?
 
-        all_items_before_cutoff = true
-
         items.each do |item|
-          created_date = item.created_at.to_date
-          closed_date = item.closed_at&.to_date
-          is_pr = !item.pull_request.nil?
-          last_comment_date = item.updated_at.to_date
-          labels = item.labels.map(&:name)
-          days_open = (Date.today - created_date).to_i
-          days_since_last_activity = (Date.today - last_comment_date).to_i
-
-          log.debug(
-            "Checking item: #{is_pr ? 'PR' : 'Issue'}, " +
-            "Created at #{created_date}, Closed at #{closed_date || 'N/A'}",
+          handle_pr_or_issue(
+            item, pr_stats, issue_stats, prs, issues, stale_cutoff, cutoff_date
           )
-
-          stats = is_pr ? pr_stats : issue_stats
-          list = is_pr ? prs : issues
-
-          # we count open as open and not waiting on contributor
-          if closed_date.nil? &&
-             !labels.include?('Status: Waiting on Contributor')
-            if stats[:oldest_open].nil? || created_date < stats[:oldest_open]
-              stats[:oldest_open] = created_date
-              stats[:oldest_open_days] = days_open
-              stats[:oldest_open_last_activity] = days_since_last_activity
-            end
-
-            stats[:stale_count] += 1 if last_comment_date < stale_cutoff
-            stats[:open] += 1
-            # Count those opened recently separately
-            if created_date >= cutoff_date
-              stats[:opened_this_period] += 1
-              list[:open] << item
-              all_items_before_cutoff = false
-            end
-          end
-
-          # Only count as closed if it was actually closed within the cutoff
-          # window
-          next unless closed_date && closed_date >= cutoff_date
-
-          # Only count this PR/Issue as closed depending on settings.
-          if is_pr
-            unless OssStats::Config::RepoStats.count_unmerged_prs
-              # Default: only count PRs that were merged
-              next unless item.pull_request && item.pull_request.merged_at
-            end
-            # when count_unmerged_prs is true we allow closed-but-unmerged PRs
-          end
-
-          # anything closed this week counts as closed regardless of when it
-          # was opened
-          list[:closed] << item
-          stats[:closed] += 1
-          stats[:total_close_time] +=
-            (item.closed_at - item.created_at) / 3600.0
-          all_items_before_cutoff = false
         end
 
         page += 1
-        break if all_items_before_cutoff
+        rate_limited_sleep
       end
+
+      # Next, fetch closed items that were updated/closed since the cutoff.
+      # Using `since` ensures we only touch recent closed items and avoid
+      # iterating through years of historical closed issues.
+      page = 1
+      loop do
+        items = gh_client.issues(
+          repo,
+          state: 'closed',
+          since: cutoff_date.to_datetime.rfc3339,
+          per_page: 100,
+          page:,
+          sort: 'updated',
+          direction: 'desc',
+        )
+        break if items.empty?
+
+        items.each do |item|
+          handle_pr_or_issue(
+            item, pr_stats, issue_stats, prs, issues, stale_cutoff, cutoff_date
+          )
+        end
+
+        page += 1
+        rate_limited_sleep
+      end
+
       pr_stats[:avg_time_to_close_hours] =
         if pr_stats[:closed].zero?
           0
@@ -164,6 +200,7 @@ module OssStats
         pipeline = match[2]
         pk = bk_client.get_pipeline(buildkite_org, pipeline)
         next unless pk
+
         pipelines << {
           pipeline:,
           org: buildkite_org,
@@ -813,8 +850,8 @@ module OssStats
           invalid_modes = v.map(&:downcase) - valid_modes
           unless invalid_modes.empty?
             raise OptionParser::InvalidArgument,
-              "Invalid mode(s): #{invalid_modes.join(', ')}." +
-              "Valid modes are: #{valid_modes.join(', ')}"
+                  "Invalid mode(s): #{invalid_modes.join(', ')}." +
+                  "Valid modes are: #{valid_modes.join(', ')}"
           end
           options[:mode] = v.map(&:downcase)
         end

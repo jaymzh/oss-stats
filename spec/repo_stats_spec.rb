@@ -54,21 +54,12 @@ RSpec.describe 'repo_stats' do
 
   describe '#get_pr_and_issue_stats' do
     it 'fetches PR and issue stats from GitHub' do
+      # the open issues query first
       allow(client).to receive(:issues).with(
         'test_org/test_repo',
-        hash_including(page: 1),
+        hash_including(state: 'open', page: 1),
       ).and_return(
         [
-          # closed PR
-          double(
-            created_at: Date.today - 7,
-            closed_at: Date.today - 5,
-            pull_request: double(
-              merged_at: Date.today - 5,
-            ),
-            updated_at: Date.today - 3,
-            labels: [],
-          ),
           # open Issue
           double(
             created_at: Date.today - 7,
@@ -81,7 +72,30 @@ RSpec.describe 'repo_stats' do
       )
       allow(client).to receive(:issues).with(
         'test_org/test_repo',
-        hash_including(page: 2),
+        hash_including(state: 'open', page: 2),
+      ).and_return([])
+
+      # Closed issues page (recent)
+      allow(client).to receive(:issues).with(
+        'test_org/test_repo',
+        hash_including(state: 'closed', page: 1),
+      ).and_return(
+        [
+          # closed PR
+          double(
+            created_at: Date.today - 7,
+            closed_at: Date.today - 5,
+            pull_request: double(
+              merged_at: Date.today - 5,
+            ),
+            updated_at: Date.today - 3,
+            labels: [],
+          ),
+        ],
+      )
+      allow(client).to receive(:issues).with(
+        'test_org/test_repo',
+        hash_including(state: 'closed', page: 2),
       ).and_return([])
 
       stats = get_pr_and_issue_stats(client, options)
@@ -126,7 +140,16 @@ RSpec.describe 'repo_stats' do
     it 'counts closed-but-unmerged PRs when configured' do
       allow(client).to receive(:issues).with(
         'test_org/test_repo',
-        hash_including(page: 1),
+        hash_including(state: 'open', page: 1),
+      ).and_return([])
+      allow(client).to receive(:issues).with(
+        'test_org/test_repo',
+        hash_including(state: 'open', page: 2),
+      ).and_return([])
+
+      allow(client).to receive(:issues).with(
+        'test_org/test_repo',
+        hash_including(state: 'closed', page: 1),
       ).and_return(
         [
           double(
@@ -140,7 +163,7 @@ RSpec.describe 'repo_stats' do
       )
       allow(client).to receive(:issues).with(
         'test_org/test_repo',
-        hash_including(page: 2),
+        hash_including(state: 'closed', page: 2),
       ).and_return([])
 
       OssStats::Config::RepoStats.count_unmerged_prs = true
@@ -222,10 +245,10 @@ RSpec.describe 'repo_stats' do
         url2 = 'https://buildkite.com/other-org/other-pipeline'
         Base64.encode64(
           <<~README,
-          Some text before
-          [![Build Status](#{badge1})](#{url1})
-          More text [![Another Badge](#{badge2})](#{url2})
-          Some text after
+            Some text before
+            [![Build Status](#{badge1})](#{url1})
+            More text [![Another Badge](#{badge2})](#{url2})
+            Some text after
           README
         )
       end
@@ -235,7 +258,7 @@ RSpec.describe 'repo_stats' do
         url = 'https://buildkite.com/test-buildkite-org/another-actual-pipeline'
         Base64.encode64(
           <<~README,
-          [![] (#{badge})](#{url})
+            [![] (#{badge})](#{url})
           README
         )
       end
@@ -862,6 +885,7 @@ RSpec.describe 'repo_stats' do
 
         ci_distinct_broken_jobs.each do |job_name|
           next if ci_failures_data['main'].key?(job_name)
+
           ci_failures_data['main'][job_name] = {
             dates: Set[Date.today - 1],
             url: "http://ci.com/#{job_name}",
@@ -1000,8 +1024,10 @@ RSpec.describe 'repo_stats' do
           mock_repo_data('r_stale', stale_pr: 100),
           mock_repo_data('r_oldest', oldest_issue_days: 100),
           mock_repo_data('r_ttc', avg_close_pr_hours: 100),
-          mock_repo_data('r_ci_days',
-ci_broken_days_map: { 'main_job' => 100 }),
+          mock_repo_data(
+            'r_ci_days',
+            ci_broken_days_map: { 'main_job' => 100 },
+          ),
           mock_repo_data(
             'r_ci_jobs',
             ci_distinct_broken_jobs: %w{j1 j2 j3 j4 j5},
@@ -1132,8 +1158,10 @@ ci_broken_days_map: { 'main_job' => 100 }),
           mock_repo_data(
             'ci_heavy_broken', ci_broken_days_map: { 'jobA' => 10, 'jobB' => 5 }
           ),
-          mock_repo_data('ci_light_broken',
-ci_broken_days_map: { 'jobA' => 1 }),
+          mock_repo_data(
+            'ci_light_broken',
+            ci_broken_days_map: { 'jobA' => 1 },
+          ),
           mock_repo_data(
             'ci_medium_broken', ci_broken_days_map: { 'jobA' => 3, 'jobB' => 3 }
           ),
