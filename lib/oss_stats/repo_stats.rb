@@ -106,8 +106,14 @@ module OssStats
           # window
           next unless closed_date && closed_date >= cutoff_date
 
-          # if it's a PR make sure it was closed by merging
-          next unless !is_pr || item.pull_request.merged_at
+          # Only count this PR/Issue as closed depending on settings.
+          if is_pr
+            unless OssStats::Config::RepoStats.count_unmerged_prs
+              # Default: only count PRs that were merged
+              next unless item.pull_request && item.pull_request.merged_at
+            end
+            # when count_unmerged_prs is true we allow closed-but-unmerged PRs
+          end
 
           # anything closed this week counts as closed regardless of when it
           # was opened
@@ -792,6 +798,12 @@ module OssStats
           '--no-links',
           'Disable Markdown links in the output (default: false)',
         ) { options[:no_links] = true }
+
+        opts.on(
+          '--count-unmerged-prs',
+          'Count PRs that were closed without merging as closed' +
+            ' (default: false)',
+        ) { options[:count_unmerged_prs] = true }
 
         opts.on(
           '--mode MODE',
