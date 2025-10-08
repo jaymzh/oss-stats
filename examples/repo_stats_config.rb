@@ -13,6 +13,11 @@ default_days 30
 log_level :info
 ci_timeout 600
 include_list false
+# by default we don't count unmerged-but-closed PRs as in "closed PRs"
+# but some workflows push commits that reference the PR as a way of
+# "merging" the PR, and if your workflow does so, you can set this so
+# that we count such PRs as "merged."
+count_unmerged_prs false
 
 # the most interesting part about this config file
 # is the organizations block. It allows you to specify

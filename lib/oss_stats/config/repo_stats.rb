@@ -36,6 +36,7 @@ module OssStats
       buildkite_token nil
       limit_gh_ops_per_minute nil
       include_list false
+      count_unmerged_prs false
       mode ['all']
       organizations({})
 

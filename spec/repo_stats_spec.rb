@@ -92,6 +92,66 @@ RSpec.describe 'repo_stats' do
       expect(stats[:issue][:closed]).to eq(0)
     end
 
+    it 'does not count closed-but-unmerged PRs by default' do
+      # closed PR but not merged
+      allow(client).to receive(:issues).with(
+        'test_org/test_repo',
+        hash_including(page: 1),
+      ).and_return(
+        [
+          double(
+            created_at: Date.today - 7,
+            closed_at: Date.today - 2,
+            pull_request: double(merged_at: nil),
+            updated_at: Date.today - 1,
+            labels: [],
+          ),
+        ],
+      )
+      allow(client).to receive(:issues).with(
+        'test_org/test_repo',
+        hash_including(page: 2),
+      ).and_return([])
+
+      # ensure default is false
+      OssStats::Config::RepoStats.count_unmerged_prs = false
+
+      stats = get_pr_and_issue_stats(client, options)
+      expect(stats[:pr][:closed]).to eq(0)
+
+      # reset
+      OssStats::Config::RepoStats.count_unmerged_prs = false
+    end
+
+    it 'counts closed-but-unmerged PRs when configured' do
+      allow(client).to receive(:issues).with(
+        'test_org/test_repo',
+        hash_including(page: 1),
+      ).and_return(
+        [
+          double(
+            created_at: Date.today - 7,
+            closed_at: Date.today - 2,
+            pull_request: double(merged_at: nil),
+            updated_at: Date.today - 1,
+            labels: [],
+          ),
+        ],
+      )
+      allow(client).to receive(:issues).with(
+        'test_org/test_repo',
+        hash_including(page: 2),
+      ).and_return([])
+
+      OssStats::Config::RepoStats.count_unmerged_prs = true
+
+      stats = get_pr_and_issue_stats(client, options)
+      expect(stats[:pr][:closed]).to eq(1)
+
+      # reset
+      OssStats::Config::RepoStats.count_unmerged_prs = false
+    end
+
     it 'handles empty responses gracefully' do
       allow(client).to receive(:issues).and_return([])
 
