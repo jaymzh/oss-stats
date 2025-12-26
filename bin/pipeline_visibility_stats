@@ -229,8 +229,9 @@ def process_buildkite_pipelines(
   # This set tracks unique "#{org}/#{slug}" for this repo to avoid duplicates
   reported_slugs = Set.new
   seen_slugs = Set.new
+  public_slugs = Set.new
 
-  # First, check to see if any pipelines in BK report being assocaited
+  # First, check to see if any pipelines in BK report being associated
   # with this repo
   pipelines_for_this_repo_direct =
     primary_org_pipelines_map_data.fetch(repo_url, [])
@@ -251,7 +252,10 @@ def process_buildkite_pipelines(
     next unless seen_slugs.add?(report_key)
 
     total_pipeline_count += 1
-    next if visibility.casecmp('public').zero?
+    if visibility&.downcase == 'public'
+      public_slugs.add(report_key)
+      next
+    end
 
     next unless reported_slugs.add?(report_key)
     log.debug("Pipeline #{report_key} is #{visibility} (direct)")
@@ -300,7 +304,26 @@ def process_buildkite_pipelines(
       end
 
       # check if we already reported in this.
-      next unless seen_slugs.add?(report_key)
+      unless seen_slugs.add?(report_key)
+        log.debug("Already processed #{report_key}, skipping")
+        next
+      end
+
+      # or if this is _not_ in our bk org, but a pipeline with an identical
+      # name is in our bk org *and* is public *and* we saw it an *earlier* PR
+      # (or is configred for the repo as a whole) we can assume it was moved and
+      # ignore it
+      if options[:detect_moved_pipelines] && bk_org != options[:buildkite_org]
+        possible_moved_repo = "#{options[:buildkite_org]}/#{bk_slug}"
+        if public_slugs.include?(possible_moved_repo)
+          log.info(
+            "Skipping #{report_key}, found public pipeline with same slug " +
+            "in #{options[:buildkite_org]} in a more recent PR or direct repo.",
+          )
+          next
+        end
+      end
+
       total_pipeline_count += 1
 
       visibility = nil
@@ -328,7 +351,11 @@ def process_buildkite_pipelines(
         visibility = pipeline_data&.dig('visibility')
       end
 
-      next if visibility&.downcase == 'public'
+      if visibility&.downcase == 'public'
+        public_slugs.add(report_key)
+        log.debug("Pipeline #{report_key} is public, skipping")
+        next
+      end
 
       source_info = "(via PR ##{pr_number}"
       source_info += ", Org: #{bk_org}" if bk_org != options[:buildkite_org]
@@ -522,6 +549,7 @@ end
 # Command-line options
 options = {
   assume_yes: false,
+  detect_moved_pipelines: true,
   log_level: :info,
   make_prs_for: [],
   pipeline_format: '%{github_org}-%{repo}-%{branch}-verify',
@@ -622,6 +650,20 @@ OptionParser.new do |opts|
     'Expected pipeline name format string. Default: ' +
     options[:pipeline_format].to_s, # Ensure string for concatenation
   ) { |v| options[:pipeline_format] = v }
+
+  opts.on(
+    '--detect-moved-pipelines',
+    'If a pipeline is detected in a PR that is not in the Buildkite org ' +
+    'specified in --buildkite-org, but a pipeline with the same slug exists ' +
+    'in that configured org _and_ is public on a more recent PR, assume it' +
+    'was moved to and do not report it. ' +
+    'Example: If --buildkite-org is "myorg" and a pipeline ' +
+    'a PR shows a pipeline called "otherorg/my-pipeline" which is private, ' +
+    'but we find a "myorg/my-pipeline" which is public, assume ' +
+    '"myorg/my-pipeline" superceeds "otherorg/my-pipeline" and do not report ' +
+    'it. ' +
+    'Defaults to true, use --no-detect-moved-pipelines to disable.',
+  ) { |v| options[:detect_moved_pipelines] = v }
 end.parse!
 
 log.level = options[:log_level] if options[:log_level]
