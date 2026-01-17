@@ -131,13 +131,11 @@ def migrate_db(db)
 end
 
 # Rename a team in the database
-def rename_team(db_file, config)
-  db = SQLite3::Database.new(db_file)
+def rename_team(db, config)
   teams = db.execute('SELECT name FROM teams ORDER BY name').flatten
 
   if teams.empty?
     log.info('No teams found in database.')
-    db.close
     return
   end
 
@@ -157,7 +155,6 @@ def rename_team(db_file, config)
 
   unless matched_team
     log.error("Team '#{old_name}' not found in database.")
-    db.close
     return
   end
 
@@ -166,13 +163,11 @@ def rename_team(db_file, config)
 
   if new_name.empty?
     log.error('New team name cannot be empty.')
-    db.close
     return
   end
 
   if teams.any? { |t| t.downcase == new_name.downcase }
     log.error("Team '#{new_name}' already exists.")
-    db.close
     return
   end
 
@@ -185,8 +180,6 @@ def rename_team(db_file, config)
     )
     log.info("Renamed team '#{matched_team}' to '#{new_name}'")
   end
-
-  db.close
 end
 
 # Get last Thursday from a given date (or today)
@@ -249,9 +242,7 @@ def prompt_team_or_q(teams)
     return false if response.nil?
 
     response = response.strip
-    return false if %w{f finish}.include?(response.downcase)
-
-    exit(0) if response.downcase == 'abort'
+    return false if %w{f finish abort}.include?(response.downcase)
 
     # Check if it's an exact match for a known team (case-insensitive)
     matched_team = teams.find { |t| t.downcase == response.downcase }
@@ -373,7 +364,7 @@ def get_or_create_team_id(db, team_name)
 end
 
 # Insert meeting data into the database
-def record_meeting_data(meeting_date, team_data, config)
+def record_meeting_data(db, meeting_date, team_data, config)
   if config.dryrun
     log.info('DRYRUN: Would record the following rows:')
     team_data.each do |row|
@@ -382,7 +373,6 @@ def record_meeting_data(meeting_date, team_data, config)
     return
   end
 
-  db = SQLite3::Database.new(config.db_file)
   team_data.each do |row|
     team_name = row.first
     team_id = get_or_create_team_id(db, team_name)
@@ -401,7 +391,6 @@ def record_meeting_data(meeting_date, team_data, config)
       [meeting_date.to_s, team_id] + row[1..-1],
     )
   end
-  db.close
   log.info("Data recorded for #{meeting_date}.")
 end
 
@@ -430,8 +419,7 @@ def format_build_status(status)
 end
 
 # Generate Markdown table
-def generate_md_page(db_file)
-  db = SQLite3::Database.new(db_file)
+def generate_md_page(db)
   meeting_dates = db.execute(
     'SELECT DISTINCT meeting_date FROM meeting_stats ' +
     'ORDER BY meeting_date DESC',
@@ -467,19 +455,16 @@ def generate_md_page(db_file)
     end
     md << ''
   end
-  db.close
   md.join("\n")
 end
 
-def summary(db_file)
-  db = SQLite3::Database.new(db_file)
+def summary(db)
   data = db.execute(
     'SELECT ms.meeting_date, t.name, ms.present, ms.build_status' +
     ' FROM meeting_stats ms' +
     ' JOIN teams t ON ms.team_id = t.id' +
     ' ORDER BY ms.meeting_date ASC',
   )
-  db.close
 
   # TODO: de-dupe this with generate_plots
   dates = data.map(&:first).uniq.reverse
@@ -501,15 +486,13 @@ def summary(db_file)
   end
 end
 
-def generate_plots(db_file, img_dir)
-  db = SQLite3::Database.new(db_file)
+def generate_plots(db, img_dir)
   data = db.execute(
     'SELECT ms.meeting_date, t.name, ms.present, ms.build_status' +
     ' FROM meeting_stats ms' +
     ' JOIN teams t ON ms.team_id = t.id' +
     ' ORDER BY ms.meeting_date ASC',
   )
-  db.close
 
   dates = data.map(&:first).uniq
   attendance_percentages = []
@@ -648,40 +631,48 @@ log.debug("Full config: #{config.to_hash}")
 
 db = initialize_db(config.db_file)
 
-# Check and migrate database if needed
-migrate_db(db) if needs_migration?(db)
+begin
+  # Check and migrate database if needed
+  migrate_db(db) if needs_migration?(db)
 
-db.close
+  meeting_date = config.date || get_last_thursday
 
-meeting_date = config.date || get_last_thursday
-
-case config.mode
-when 'record'
-  team_data = collect_team_data(meeting_date)
-  record_meeting_data(meeting_date, team_data, config)
-when 'generate'
-  if config.dryrun
-    log.info('DRYRUN: Would update plots')
-    log.info("DRYRUN: Would update #{config.output} with:")
-    log.info(generate_md_page(config.db_file))
+  case config.mode
+  when 'record'
+    team_data = collect_team_data(meeting_date)
+    record_meeting_data(db, meeting_date, team_data, config)
+  when 'generate'
+    if config.dryrun
+      log.info('DRYRUN: Would update plots')
+      log.info("DRYRUN: Would update #{config.output} with:")
+      log.info(generate_md_page(db))
+    else
+      log.info('Updating plots...')
+      generate_plots(db, config.image_dir)
+      log.info("Generating #{config.output}")
+      File.write(config.output, generate_md_page(db))
+    end
+  when 'generate_plot'
+    if config.dryrun
+      log.info('DRYRUN: Would update plots')
+    else
+      generate_plots(db, config.image_dir)
+      log.info('Plots generated: attendance.png and build_status.png')
+    end
+  when 'summary'
+    summary(db)
+  when 'rename_team'
+    rename_team(db, config)
   else
-    log.info('Updating plots...')
-    generate_plots(config.db_file, config.image_dir)
-    log.info("Generating #{config.output}")
-    File.write(config.output, generate_md_page(config.db_file))
+    log.info('Invalid mode. Use --mode record, generate, generate_plot, ' +
+             'summary, or rename_team.')
   end
-when 'generate_plot'
-  if config.dryrun
-    log.info('DRYRUN: Would update plots')
-  else
-    generate_plots(config.db_file, config.image_dir)
-    log.info('Plots generated: attendance.png and build_status.png')
-  end
-when 'summary'
-  summary(config.db_file)
-when 'rename_team'
-  rename_team(config.db_file, config)
-else
-  log.info('Invalid mode. Use --mode record, generate, generate_plot, ' +
-           'summary, or rename_team.')
+rescue Interrupt
+  log.info("\nInterrupted by user, cleaning up...")
+rescue StandardError => e
+  log.error("Error: #{e.message}")
+  log.debug(e.backtrace.join("\n"))
+  raise
+ensure
+  db.close if db
 end
