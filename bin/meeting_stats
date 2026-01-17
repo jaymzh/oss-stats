@@ -10,22 +10,182 @@ require 'readline'
 require_relative '../lib/oss_stats/log'
 require_relative '../lib/oss_stats/config/meeting_stats'
 
-# Initialize database
+# Initialize database with new schema
 def initialize_db(db_file)
   db = SQLite3::Database.new(db_file)
+
+  # Create teams table
+  db.execute <<-SQL
+    CREATE TABLE IF NOT EXISTS teams (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT UNIQUE NOT NULL
+    );
+  SQL
+
+  # Create meeting_stats table with foreign key to teams
   db.execute <<-SQL
     CREATE TABLE IF NOT EXISTS meeting_stats (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       meeting_date TEXT,
-      team TEXT,
+      team_id INTEGER,
       present TEXT,
       current_work TEXT,
       build_status TEXT,
       fix_points TEXT,
       extra TEXT,
-      UNIQUE(meeting_date, team)
+      FOREIGN KEY(team_id) REFERENCES teams(id),
+      UNIQUE(meeting_date, team_id)
     );
   SQL
+
+  db
+end
+
+# Check if database needs migration from old schema
+def needs_migration?(db)
+  # Check if the old schema exists (team column as TEXT)
+  columns = db.execute(
+    'PRAGMA table_info(meeting_stats)',
+  ).map { |col| [col[1], col[2]] }.to_h
+
+  # If meeting_stats doesn't exist yet, no migration needed
+  return false if columns.empty?
+
+  # If team column exists and is TEXT, needs migration
+  columns['team'] == 'TEXT'
+end
+
+# Migrate database from old schema to new schema
+def migrate_db(db)
+  log.info('Detected old database schema, migrating...')
+
+  db.execute('BEGIN TRANSACTION')
+
+  begin
+    # Create teams table
+    db.execute <<-SQL
+      CREATE TABLE IF NOT EXISTS teams (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT UNIQUE NOT NULL
+      );
+    SQL
+
+    # Extract unique team names and insert into teams table
+    old_teams = db.execute(
+      'SELECT DISTINCT team FROM meeting_stats ORDER BY team',
+    ).flatten
+
+    old_teams.each do |team_name|
+      db.execute(
+        'INSERT OR IGNORE INTO teams (name) VALUES (?)',
+        [team_name],
+      )
+    end
+
+    # Create new meeting_stats table with proper schema
+    db.execute <<-SQL
+      CREATE TABLE meeting_stats_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        meeting_date TEXT,
+        team_id INTEGER,
+        present TEXT,
+        current_work TEXT,
+        build_status TEXT,
+        fix_points TEXT,
+        extra TEXT,
+        FOREIGN KEY(team_id) REFERENCES teams(id),
+        UNIQUE(meeting_date, team_id)
+      );
+    SQL
+
+    # Migrate data from old table to new table
+    db.execute <<-SQL
+      INSERT INTO meeting_stats_new
+        (meeting_date, team_id, present, current_work,
+         build_status, fix_points, extra)
+      SELECT
+        ms.meeting_date,
+        t.id,
+        ms.present,
+        ms.current_work,
+        ms.build_status,
+        ms.fix_points,
+        ms.extra
+      FROM meeting_stats ms
+      JOIN teams t ON ms.team = t.name;
+    SQL
+
+    # Drop old table and rename new one
+    db.execute('DROP TABLE meeting_stats')
+    db.execute(
+      'ALTER TABLE meeting_stats_new RENAME TO meeting_stats',
+    )
+
+    db.execute('COMMIT')
+    log.info('Migration completed successfully!')
+  rescue StandardError => e
+    db.execute('ROLLBACK')
+    log.error("Migration failed: #{e.message}")
+    raise
+  end
+end
+
+# Rename a team in the database
+def rename_team(db_file, config)
+  db = SQLite3::Database.new(db_file)
+  teams = db.execute('SELECT name FROM teams ORDER BY name').flatten
+
+  if teams.empty?
+    log.info('No teams found in database.')
+    db.close
+    return
+  end
+
+  log.info('Current teams in database:')
+  teams.each { |team| log.info("  - #{team}") }
+  log.info('')
+
+  setup_readline_completion(teams)
+
+  old_name = Readline.readline('Team to rename (TAB to complete): ', true)
+  return if old_name.nil? || old_name.strip.empty?
+
+  old_name = old_name.strip
+
+  # Find exact match (case-insensitive)
+  matched_team = teams.find { |t| t.downcase == old_name.downcase }
+
+  unless matched_team
+    log.error("Team '#{old_name}' not found in database.")
+    db.close
+    return
+  end
+
+  print "New name for '#{matched_team}': "
+  new_name = gets.strip
+
+  if new_name.empty?
+    log.error('New team name cannot be empty.')
+    db.close
+    return
+  end
+
+  if teams.any? { |t| t.downcase == new_name.downcase }
+    log.error("Team '#{new_name}' already exists.")
+    db.close
+    return
+  end
+
+  if config.dryrun
+    log.info("DRYRUN: Would rename '#{matched_team}' to '#{new_name}'")
+  else
+    db.execute(
+      'UPDATE teams SET name = ? WHERE name = ?',
+      [new_name, matched_team],
+    )
+    log.info("Renamed team '#{matched_team}' to '#{new_name}'")
+  end
+
   db.close
 end
 
@@ -46,29 +206,31 @@ def prompt_yes_no(question)
   end
 end
 
-def prompt_team_or_q(teams)
-  # Setup readline completion with team names
-  all_options = teams + %w{other finish f abort}
-
+# Setup readline for case-insensitive completion with given options
+def setup_readline_completion(options)
   comp = proc do |s|
-    # Case-insensitive completion
-    all_options.select { |opt| opt.downcase.start_with?(s.downcase) }
+    options.select { |opt| opt.downcase.start_with?(s.downcase) }
   end
 
   Readline.completion_append_character = nil
   Readline.completion_proc = comp
 
-  # Make readline case-insensitive
   if Readline.respond_to?(:completion_case_fold=)
     Readline.completion_case_fold = true
   end
 
-  # Remove space from word break characters so "Chef Client" is treated as one
-  # word
-  if Readline.respond_to?(:completer_word_break_characters=)
-    original_word_break = Readline.completer_word_break_characters
-    Readline.completer_word_break_characters = original_word_break.delete(' ')
-  end
+  # Remove space from word break characters so multi-word
+  # options like "Chef Client" are treated as one word
+  return unless Readline.respond_to?(:completer_word_break_characters=)
+
+  original_word_break = Readline.completer_word_break_characters
+  Readline.completer_word_break_characters =
+    original_word_break.delete(' ')
+end
+
+def prompt_team_or_q(teams)
+  all_options = teams + %w{other finish f abort}
+  setup_readline_completion(all_options)
 
   loop do
     log.info(
@@ -198,6 +360,18 @@ def collect_team_data(meeting_date)
   end
 end
 
+# Get or create team ID
+def get_or_create_team_id(db, team_name)
+  result = db.execute(
+    'SELECT id FROM teams WHERE name = ?',
+    [team_name],
+  )
+  return result[0][0] unless result.empty?
+
+  db.execute('INSERT INTO teams (name) VALUES (?)', [team_name])
+  db.last_insert_row_id
+end
+
 # Insert meeting data into the database
 def record_meeting_data(meeting_date, team_data, config)
   if config.dryrun
@@ -210,14 +384,21 @@ def record_meeting_data(meeting_date, team_data, config)
 
   db = SQLite3::Database.new(config.db_file)
   team_data.each do |row|
+    team_name = row.first
+    team_id = get_or_create_team_id(db, team_name)
+
     db.execute(
-      'INSERT INTO meeting_stats (meeting_date, team, present, current_work,' +
-      'build_status, fix_points, extra) VALUES (?, ?, ?, ?, ?, ?, ?)' +
-      ' ON CONFLICT(meeting_date, team) DO UPDATE' +
-      ' SET present=excluded.present, current_work=excluded.current_work,' +
-      ' build_status=excluded.build_status, fix_points=excluded.fix_points,' +
-      ' extra=excluded.extra',
-      [meeting_date.to_s] + row,
+      'INSERT INTO meeting_stats ' +
+      '(meeting_date, team_id, present, current_work, ' +
+      'build_status, fix_points, extra) ' +
+      'VALUES (?, ?, ?, ?, ?, ?, ?) ' +
+      'ON CONFLICT(meeting_date, team_id) DO UPDATE ' +
+      'SET present=excluded.present, ' +
+      'current_work=excluded.current_work, ' +
+      'build_status=excluded.build_status, ' +
+      'fix_points=excluded.fix_points, ' +
+      'extra=excluded.extra',
+      [meeting_date.to_s, team_id] + row[1..-1],
     )
   end
   db.close
@@ -252,15 +433,19 @@ end
 def generate_md_page(db_file)
   db = SQLite3::Database.new(db_file)
   meeting_dates = db.execute(
-    'SELECT DISTINCT meeting_date FROM meeting_stats ORDER BY meeting_date' +
-    ' DESC',
+    'SELECT DISTINCT meeting_date FROM meeting_stats ' +
+    'ORDER BY meeting_date DESC',
   ).flatten
   md = [OssStats::Config::MeetingStats.header]
 
   meeting_dates.each do |meeting_date|
     team_data = db.execute(
-      'SELECT team, present, current_work, build_status, fix_points, extra' +
-      ' FROM meeting_stats WHERE meeting_date = ?',
+      'SELECT t.name, ms.present, ms.current_work, ' +
+      'ms.build_status, ms.fix_points, ms.extra ' +
+      'FROM meeting_stats ms ' +
+      'JOIN teams t ON ms.team_id = t.id ' +
+      'WHERE ms.meeting_date = ? ' +
+      'ORDER BY t.name',
       [meeting_date],
     )
     md << "## #{meeting_date}"
@@ -289,8 +474,10 @@ end
 def summary(db_file)
   db = SQLite3::Database.new(db_file)
   data = db.execute(
-    'SELECT meeting_date, team, present, build_status FROM meeting_stats' +
-    ' ORDER BY meeting_date ASC',
+    'SELECT ms.meeting_date, t.name, ms.present, ms.build_status' +
+    ' FROM meeting_stats ms' +
+    ' JOIN teams t ON ms.team_id = t.id' +
+    ' ORDER BY ms.meeting_date ASC',
   )
   db.close
 
@@ -317,8 +504,10 @@ end
 def generate_plots(db_file, img_dir)
   db = SQLite3::Database.new(db_file)
   data = db.execute(
-    'SELECT meeting_date, team, present, build_status FROM meeting_stats' +
-    ' ORDER BY meeting_date ASC',
+    'SELECT ms.meeting_date, t.name, ms.present, ms.build_status' +
+    ' FROM meeting_stats ms' +
+    ' JOIN teams t ON ms.team_id = t.id' +
+    ' ORDER BY ms.meeting_date ASC',
   )
   db.close
 
@@ -417,10 +606,11 @@ OptionParser.new do |opts|
   opts.on(
     '-m MODE',
     '--mode MODE',
-    %w{record generate generate_plot summary},
-    'Mode to operate in. record: Input new meeting info, generate: generate ' +
-    'both plot and markdown files, generate_plot: generate new plots, ' +
-    'summary: generate summary of last 3 meetings [default: record]',
+    %w{record generate generate_plot summary rename_team},
+    'Mode to operate in. record: Input new meeting info, generate: ' +
+    'generate both plot and markdown files, generate_plot: generate ' +
+    'new plots, summary: generate summary of last 3 meetings, ' +
+    'rename_team: rename a team in the database [default: record]',
   ) do |v|
     options[:mode] = v
   end
@@ -456,7 +646,13 @@ log.level = config.log_level
 
 log.debug("Full config: #{config.to_hash}")
 
-initialize_db(config.db_file)
+db = initialize_db(config.db_file)
+
+# Check and migrate database if needed
+migrate_db(db) if needs_migration?(db)
+
+db.close
+
 meeting_date = config.date || get_last_thursday
 
 case config.mode
@@ -483,6 +679,9 @@ when 'generate_plot'
   end
 when 'summary'
   summary(config.db_file)
+when 'rename_team'
+  rename_team(config.db_file, config)
 else
-  log.info('Invalid mode. Use --mode record, markdown, or plot.')
+  log.info('Invalid mode. Use --mode record, generate, generate_plot, ' +
+           'summary, or rename_team.')
 end
