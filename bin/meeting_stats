@@ -5,6 +5,7 @@ require 'date'
 require 'sqlite3'
 require 'fileutils'
 require 'gruff'
+require 'readline'
 
 require_relative '../lib/oss_stats/log'
 require_relative '../lib/oss_stats/config/meeting_stats'
@@ -46,33 +47,64 @@ def prompt_yes_no(question)
 end
 
 def prompt_team_or_q(teams)
-  # it's length, not length-1 because we add one for <other>
-  max_num = teams.length
+  # Setup readline completion with team names
+  all_options = teams + %w{other finish f abort}
+
+  comp = proc do |s|
+    # Case-insensitive completion
+    all_options.select { |opt| opt.downcase.start_with?(s.downcase) }
+  end
+
+  Readline.completion_append_character = nil
+  Readline.completion_proc = comp
+
+  # Make readline case-insensitive
+  if Readline.respond_to?(:completion_case_fold=)
+    Readline.completion_case_fold = true
+  end
+
+  # Remove space from word break characters so "Chef Client" is treated as one
+  # word
+  if Readline.respond_to?(:completer_word_break_characters=)
+    original_word_break = Readline.completer_word_break_characters
+    Readline.completer_word_break_characters = original_word_break.delete(' ')
+  end
+
   loop do
-    log.info("Choose a team that was present:\n")
-    (teams + ['<Other>']).each_with_index do |team, idx|
-      log.info("  [#{idx}] #{team}")
+    log.info(
+      'Choose a team that was present (type to search, TAB to complete):',
+    )
+    teams.each do |team|
+      log.info("  - #{team}")
     end
-    log.info('  [q] <quit>')
-    print "\nTeam?> "
-    response = gets.strip.downcase
-    return false if response == 'q'
-    begin
-      i = Integer(response)
-      if i < max_num
-        return teams[i]
-      end
+    log.info("\n  - other (for a team not in the list)")
+    log.info('  - abort (to quit without saving)')
+    log.info('  - [f]inish (to save)')
+    log.info('')
+    response = Readline.readline('Team?> ', true)
 
-      if i == max_num
-        print 'Team name: '
-        response = gets.strip
-        return response
-      end
+    # Handle Ctrl-C or Ctrl-D
+    return false if response.nil?
 
-      log.error("Invalid response: #{response}")
-    rescue ArgumentError
-      log.error("Invalid response: #{response}")
+    response = response.strip
+    return false if %w{f finish}.include?(response.downcase)
+
+    exit(0) if response.downcase == 'abort'
+
+    # Check if it's an exact match for a known team (case-insensitive)
+    matched_team = teams.find { |t| t.downcase == response.downcase }
+    return matched_team if matched_team
+
+    if response.downcase == 'other'
+      print 'Team name: '
+      new_team = gets.strip
+      return new_team unless new_team.empty?
+
+      log.error('Team name cannot be empty')
+      next
     end
+
+    log.error('Please enter a valid options')
   end
 end
 
@@ -94,28 +126,28 @@ def collect_team_data(meeting_date)
         )
         confirm = prompt_yes_no('Is that correct?')
       end
-      if confirm
-        missing_teams.each do |mt|
-          team_data[mt] = {
-            'present' => false,
-            'current_work' => false,
-            'build_status' => '',
-            'fix_pointers' => '-',
-            'extra' => '-',
-          }
-        end
-        break
-      else
-        next
+      next unless confirm
+
+      missing_teams.each do |mt|
+        team_data[mt] = {
+          'present' => false,
+          'current_work' => false,
+          'build_status' => '',
+          'fix_pointers' => '-',
+          'extra' => '-',
+        }
       end
+      break
+
     end
 
     if team_data[team]
-      if prompt_yes_no("WARNING: #{team} data already input - overwrite?")
-        log.info("OK, overwriting data for #{team} on #{meeting_date}")
-      else
+      unless prompt_yes_no("WARNING: #{team} data already input - overwrite?")
         next
       end
+
+      log.info("OK, overwriting data for #{team} on #{meeting_date}")
+
     end
 
     log.info("\nTeam: #{team}")
@@ -212,9 +244,7 @@ end
 def format_build_status(status)
   return ':x:' if status.nil? || status.strip.empty?
 
-  if %w{red green}.include?(status)
-    status = "main:#{status}"
-  end
+  status = "main:#{status}" if %w{red green}.include?(status)
   status.gsub('red', ' :red_circle:').gsub('green', ' :white_check_mark:')
 end
 
@@ -354,7 +384,7 @@ OptionParser.new do |opts|
     options[:date] =
       begin
         Date.parse(v)
-      rescue
+      rescue StandardError
         nil
       end
   end
