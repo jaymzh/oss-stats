@@ -12,6 +12,10 @@ project, and you can see
 [examples/meeting_stats_config.rb](../examples/meeting_stats_config.rb) for an
 example.
 
+Note that the teams list is just an initial list for creating the database. The
+list in the config is ignored once the database is created, and you can
+add/remove/rename teams from the cli.
+
 It keeps all data in a SQLite DB. You can specify where this is with
 `--db-file`, and the default is `./data/meeting_data.sqlite3`.
 

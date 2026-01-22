@@ -266,9 +266,30 @@ def prompt_team_or_q(teams)
   end
 end
 
+# Get teams from database
+def get_teams_from_db(db)
+  db.execute('SELECT name FROM teams ORDER BY name').flatten
+end
+
+# Seed teams table from config if empty
+def seed_teams_if_empty(db, config)
+  teams_in_db = get_teams_from_db(db)
+  return unless teams_in_db.empty?
+
+  config_teams = config.teams
+  return if config_teams.empty?
+
+  log.info('Teams table is empty. Seeding from config...')
+  config_teams.each do |team_name|
+    db.execute('INSERT INTO teams (name) VALUES (?)', [team_name])
+    log.debug("  - Added team: #{team_name}")
+  end
+  log.info('Teams table seeded successfully!')
+end
+
 # Collect team data from user
-def collect_team_data(meeting_date)
-  teams = OssStats::Config::MeetingStats.teams
+def collect_team_data(db, meeting_date)
+  teams = get_teams_from_db(db)
   team_data = {}
 
   log.info("Please fill in data about the #{meeting_date} meeting\n")
@@ -644,7 +665,8 @@ begin
 
   case config.mode
   when 'record'
-    team_data = collect_team_data(meeting_date)
+    seed_teams_if_empty(db, config)
+    team_data = collect_team_data(db, meeting_date)
     record_meeting_data(db, meeting_date, team_data, config)
   when 'generate'
     if config.dryrun
