@@ -5,7 +5,7 @@ require 'date'
 require 'sqlite3'
 require 'fileutils'
 require 'gruff'
-require 'readline'
+require 'reline'
 
 require_relative '../lib/oss_stats/log'
 require_relative '../lib/oss_stats/config/meeting_stats'
@@ -145,7 +145,7 @@ def rename_team(db, config)
 
   setup_readline_completion(teams)
 
-  old_name = Readline.readline('Team to rename (TAB to complete): ', true)
+  old_name = Reline.readline('Team to rename (TAB to complete): ', true)
   return if old_name.nil? || old_name.strip.empty?
 
   old_name = old_name.strip
@@ -205,19 +205,19 @@ def setup_readline_completion(options)
     options.select { |opt| opt.downcase.start_with?(s.downcase) }
   end
 
-  Readline.completion_append_character = nil
-  Readline.completion_proc = comp
+  Reline.completion_append_character = nil
+  Reline.completion_proc = comp
 
-  if Readline.respond_to?(:completion_case_fold=)
-    Readline.completion_case_fold = true
+  if Reline.respond_to?(:completion_case_fold=)
+    Reline.completion_case_fold = true
   end
 
   # Remove space from word break characters so multi-word
   # options like "Chef Client" are treated as one word
-  return unless Readline.respond_to?(:completer_word_break_characters=)
+  return unless Reline.respond_to?(:completer_word_break_characters=)
 
-  original_word_break = Readline.completer_word_break_characters
-  Readline.completer_word_break_characters =
+  original_word_break = Reline.completer_word_break_characters
+  Reline.completer_word_break_characters =
     original_word_break.delete(' ')
 end
 
@@ -236,7 +236,7 @@ def prompt_team_or_q(teams)
     log.info('  - abort (to quit without saving)')
     log.info('  - [f]inish (to save)')
     log.info('')
-    response = Readline.readline('Team?> ', true)
+    response = Reline.readline('Team?> ', true)
 
     # Handle Ctrl-C or Ctrl-D
     return false if response.nil?

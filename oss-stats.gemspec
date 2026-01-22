@@ -36,6 +36,7 @@ Gem::Specification.new do |spec|
     mixlib-config
     mixlib-log
     octokit
+    reline
     sqlite3
   }.each do |dep|
     spec.add_dependency dep

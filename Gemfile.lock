@@ -9,6 +9,7 @@ PATH
       mixlib-config
       mixlib-log
       octokit
+      reline
       sqlite3
 
 GEM
@@ -49,6 +50,7 @@ GEM
       histogram
       rmagick (>= 5.5)
     histogram (0.2.4.1)
+    io-console (0.8.2)
     json (2.12.2)
     kramdown (2.5.1)
       rexml (>= 3.3.9)
@@ -86,6 +88,8 @@ GEM
     racc (1.8.1)
     rainbow (3.1.1)
     regexp_parser (2.10.0)
+    reline (0.6.3)
+      io-console (~> 0.5)
     rexml (3.4.1)
     rmagick (6.1.1)
       observer (~> 0.1)
