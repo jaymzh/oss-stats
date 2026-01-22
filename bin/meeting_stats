@@ -242,7 +242,12 @@ def prompt_team_or_q(teams)
     return false if response.nil?
 
     response = response.strip
-    return false if %w{f finish abort}.include?(response.downcase)
+    return false if %w{f finish}.include?(response.downcase)
+
+    if response.downcase == 'abort'
+      log.info('Exiting at user request')
+      exit(0)
+    end
 
     # Check if it's an exact match for a known team (case-insensitive)
     matched_team = teams.find { |t| t.downcase == response.downcase }
