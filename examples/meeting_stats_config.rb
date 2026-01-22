@@ -4,6 +4,7 @@ db_file DEFAULT_DB_FILE = File.expand_path(
 )
 output File.expand_path('./team_meeting_reports.md', __dir__)
 image_dir File.expand_path('./images', __dir__)
+# NOTE: This is an INITIAL list only!
 teams [
   'Client',
   'Server',
