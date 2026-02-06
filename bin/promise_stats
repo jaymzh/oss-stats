@@ -199,13 +199,13 @@ end
 def main
   if ARGV.empty? || %w{--help -h}.include?(ARGV.first)
     puts <<~HELP
-      Usage: #{$PROGRAM_NAME} [subcommand] [options]
+      Usage: #{$PROGRAM_NAME} [options]
 
-      Subcommands:
-        add-promise         Add a new promise
-        resolve-promise     Resolve a pending promise
-        abandon-promise     Mark a promise as abandoned
-        edit-promise        Edit an existing promise
+      Modes:
+        add                 Add a new promise
+        resolve             Resolve a pending promise
+        abandon             Mark a promise as abandoned
+        edit                Edit an existing promise
         status              Show unresolved promises
 
       Options:
@@ -214,9 +214,10 @@ def main
         --reference="text"        Optional reference
         --db-file=FILE            SQLite3 DB file
         --include-abandoned       Show abandoned in status
+        --mode=MODE               Mode to operate in
 
       Example:
-        #{$PROGRAM_NAME} add-promise --promise="Call mom" --date=2025-05-08
+        #{$PROGRAM_NAME} -m add-promise --promise="Call mom" --date=2025-05-08
     HELP
     exit
   end
