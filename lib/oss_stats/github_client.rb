@@ -30,7 +30,7 @@ module OssStats
       pr_uri.query = URI.encode_www_form(pr_query_params)
       get(pr_uri.path)
     rescue StandardError => e
-      log.error("Error fetching PRs for #{repo_url}: #{e.message}")
+      log.error("Error fetching PRs for #{org}/#{repo}: #{e.message}")
       []
     end
 
