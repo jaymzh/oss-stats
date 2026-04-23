@@ -33,13 +33,13 @@ it one.
 In your fresh directory, run this command to set everything up:
 
 ```bash
-\curl -sSL https://raw.githubusercontent.com/jaymzh/oss-stats/refs/heads/main/bin/initialize_repo.sh | bash -s
+\curl -sSL https://raw.githubusercontent.com/jaymzh/oss-stats/refs/heads/main/scripts/initialize_repo.sh | bash -s
 ```
 
 You can pass in some options like:
 
 ```bash
-\curl -sSL https://raw.githubusercontent.com/jaymzh/oss-stats/refs/heads/main/bin/initialize_repo.sh | bash -s -- <options>
+\curl -sSL https://raw.githubusercontent.com/jaymzh/oss-stats/refs/heads/main/scripts/initialize_repo.sh | bash -s -- <options>
 ```
 
 You can find valid options with `-h`.
