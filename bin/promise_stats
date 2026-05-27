@@ -217,7 +217,7 @@ def main
         --mode=MODE               Mode to operate in
 
       Example:
-        #{$PROGRAM_NAME} -m add-promise --promise="Call mom" --date=2025-05-08
+        #{$PROGRAM_NAME} -m add --promise="Call mom" --date=2025-05-08
     HELP
     exit
   end
@@ -291,7 +291,7 @@ def main
   case config.mode
   when 'add'
     desc = options[:promise] || prompt('Promise')
-    date = options[:date] || promt_date
+    date = options[:date] || prompt_date
     ref = options[:reference] || prompt('Reference (optional)')
     add_promise(config, desc, date, ref)
   when 'resolve'
