@@ -1,9 +1,17 @@
 # OSS Stats
 
-[![Lint](https://github.com/jaymzh/oss-stats/actions/workflows/lint.yml/badge.svg)](https://github.com/jaymzh/oss-stats/actions/workflows/lint.yml)
-[![Unittests](https://github.com/jaymzh/oss-stats/actions/workflows/unit.yml/badge.svg)](https://github.com/jaymzh/oss-stats/actions/workflows/unit.yml)
-[![DCO Check](https://github.com/jaymzh/oss-stats/actions/workflows/dco.yml/badge.svg)](https://github.com/jaymzh/oss-stats/actions/workflows/dco.yml)
-[![Gem Version](https://badge.fury.io/rb/oss-stats.svg)](https://badge.fury.io/rb/oss-stats)
+[![Lint](
+https://github.com/jaymzh/oss-stats/actions/workflows/lint.yml/badge.svg
+)](https://github.com/jaymzh/oss-stats/actions/workflows/lint.yml)
+[![Unittests](
+https://github.com/jaymzh/oss-stats/actions/workflows/unit.yml/badge.svg
+)](https://github.com/jaymzh/oss-stats/actions/workflows/unit.yml)
+[![DCO Check](
+https://github.com/jaymzh/oss-stats/actions/workflows/dco.yml/badge.svg
+)](https://github.com/jaymzh/oss-stats/actions/workflows/dco.yml)
+[![Gem Version](
+https://badge.fury.io/rb/oss-stats.svg
+)](https://badge.fury.io/rb/oss-stats)
 
 This is a collection of tools that aim to make it easier to track and report
 various metrics around health of an open source project.
@@ -139,8 +147,8 @@ See [MeetingStats.md](docs/MeetingStats.md) for full details.
 
 ### Promises
 
-[promise_stats](bin/promise_stats) allows you to add, edit, resolve, abandon, and
-report on promises made. This can be useful for both promises made to the
+[promise_stats](bin/promise_stats) allows you to add, edit, resolve, abandon,
+and report on promises made. This can be useful for both promises made to the
 community or promises made between teams.
 
 See [PromiseStats.md](docs/PromiseStats.md) for full details.
@@ -158,7 +166,8 @@ places, in order:
 1. The `--github-token` command-line argument
 1. The `github_token` config file entry
 1. The `GITHUB_TOKEN` environment variable.
-1. It'll also parse it from `~/.config/gh/hosts.yml` if you use the `gh` CLI tool.
+1. It'll also parse it from `~/.config/gh/hosts.yml` if you use the `gh` CLI
+   tool.
 
 ### Buildkite Token
 
