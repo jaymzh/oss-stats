@@ -20,7 +20,7 @@ GEM
     ast (2.4.3)
     base64 (0.3.0)
     bigdecimal (3.2.2)
-    chef-utils (19.2.12)
+    chef-utils (19.3.15)
       concurrent-ruby
     concurrent-ruby (1.3.6)
     cookstyle (8.6.10)
@@ -59,8 +59,8 @@ GEM
     language_server-protocol (3.17.0.5)
     lint_roller (1.1.0)
     logger (1.7.0)
-    mdl (0.15.0)
-      kramdown (~> 2.3)
+    mdl (0.17.0)
+      kramdown (~> 2.5)
       kramdown-parser-gfm (~> 1.1)
       mixlib-cli
       mixlib-config
