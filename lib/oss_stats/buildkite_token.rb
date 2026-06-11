@@ -1,5 +1,5 @@
 def get_buildkite_token(options)
-  return options[:buildkite_token] if options[:buildkite_tokne]
+  return options[:buildkite_token] if options[:buildkite_token]
   return ENV['BUILDKITE_API_TOKEN'] if ENV['BUILDKITE_API_TOKEN']
   nil
 end
