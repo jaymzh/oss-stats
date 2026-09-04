@@ -516,9 +516,9 @@ module OssStats
                   info = latest_info[job_name_key]
                   job_data = failed_tests[branch][job_name_key]
                   if info && (
-                      job_data[:latest_checked_at].nil? ||
-                      info[:latest_checked_at] > job_data[:latest_checked_at]
-                    )
+                    job_data[:latest_checked_at].nil? ||
+                    info[:latest_checked_at] > job_data[:latest_checked_at]
+                  )
                     job_data[:latest_status] = info[:latest_status]
                     job_data[:latest_checked_at] = info[:latest_checked_at]
                   end

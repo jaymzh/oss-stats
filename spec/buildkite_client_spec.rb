@@ -81,7 +81,7 @@ RSpec.describe OssStats::BuildkiteClient do
             'pipeline' => {
               'builds' => {
                 'edges' => [
-                  { 'node' => { 'state' => 'FAILED'  } },
+                  { 'node' => { 'state' => 'FAILED' } },
                 ],
                 'pageInfo' => { 'hasNextPage' => false, 'endCursor' => nil },
               },
