@@ -25,6 +25,8 @@ module OssStats
       output File.expand_path('./meeting_stats.md', Dir.pwd)
       image_dir File.expand_path('./images', Dir.pwd)
       log_level :info
+      meeting_dow 'thursday'
+      meeting_frequency 'weekly'
       mode 'record'
       teams []
 
