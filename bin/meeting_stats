@@ -555,7 +555,7 @@ def summary(db)
   dates[0..2].each do |date|
     total_teams = data.count { |row| row.first == date }
     present_teams = data.count { |row| row.first == date && row[2] == 'Y' }
-    present_pct = ((present_teams / total_teams) * 100).round(2)
+    present_pct = ((present_teams.to_f / total_teams) * 100).round(2)
     reporting_builds = data.count do |row|
       row.first == date && row[3] != 'N' && !row[3].strip.empty?
     end
