@@ -182,10 +182,68 @@ def rename_team(db, config)
   end
 end
 
-# Get last Thursday from a given date (or today)
-def get_last_thursday(target_date = Date.today)
-  target_date -= 1 while target_date.wday != 4 # 4 = Thursday
+DAYS_OF_WEEK = %w{sunday monday tuesday wednesday thursday friday
+                  saturday}.freeze
+MEETING_FREQUENCIES = %w{daily weekly 2weeks monthly}.freeze
+
+# Convert a meeting_dow config value (either a day name like 'thursday'
+# or an integer 0-6) into a Date#wday-compatible integer.
+def dow_to_wday(dow)
+  return dow if dow.is_a?(Integer)
+
+  wday = DAYS_OF_WEEK.index(dow.to_s.downcase)
+  return wday if wday
+
+  log.warn("Invalid meeting_dow '#{dow}', defaulting to thursday")
+  4
+end
+
+# Get the most recent date matching `wday` from a given date (or today)
+def get_last_meeting_date(wday, target_date = Date.today)
+  target_date -= 1 while target_date.wday != wday
   target_date
+end
+
+# Given a meeting date, compute the date of the following meeting
+# based on the configured frequency.
+def next_meeting_date(date, frequency)
+  case frequency
+  when 'daily'
+    date + 1
+  when '2weeks'
+    date + 14
+  when 'monthly'
+    date >> 1
+  else
+    unless MEETING_FREQUENCIES.include?(frequency)
+      log.warn("Invalid meeting_frequency '#{frequency}', defaulting to weekly")
+    end
+    date + 7
+  end
+end
+
+# Compute the list of meeting dates that need to be recorded: every
+# meeting date, per the configured dow/frequency, since the last one
+# recorded in the database (exclusive) through the most recent valid
+# meeting date (inclusive). If the database has no meetings yet, this
+# is just the most recent valid meeting date.
+def dates_to_record(db, config)
+  wday = dow_to_wday(config.meeting_dow)
+  latest_valid = get_last_meeting_date(wday)
+
+  last_recorded = db.execute(
+    'SELECT MAX(meeting_date) FROM meeting_stats',
+  ).flatten.first
+  return [latest_valid] if last_recorded.nil?
+
+  dates = []
+  last_recorded_date = Date.parse(last_recorded)
+  current = next_meeting_date(last_recorded_date, config.meeting_frequency)
+  while current <= latest_valid
+    dates << current
+    current = next_meeting_date(current, config.meeting_frequency)
+  end
+  dates
 end
 
 # Prompt user for a Yes/No response
@@ -661,13 +719,26 @@ begin
   # Check and migrate database if needed
   migrate_db(db) if needs_migration?(db)
 
-  meeting_date = config.date || get_last_thursday
-
   case config.mode
   when 'record'
     seed_teams_if_empty(db, config)
-    team_data = collect_team_data(db, meeting_date)
-    record_meeting_data(db, meeting_date, team_data, config)
+    if config.date
+      team_data = collect_team_data(db, config.date)
+      record_meeting_data(db, config.date, team_data, config)
+    else
+      meeting_dates = dates_to_record(db, config)
+      if meeting_dates.empty?
+        log.info('No new meetings to record.')
+      end
+      meeting_dates.each do |meeting_date|
+        unless prompt_yes_no("Record data for meeting on #{meeting_date}?")
+          log.info("Skipping meeting on #{meeting_date}")
+          next
+        end
+        team_data = collect_team_data(db, meeting_date)
+        record_meeting_data(db, meeting_date, team_data, config)
+      end
+    end
   when 'generate'
     if config.dryrun
       log.info('DRYRUN: Would update plots')
