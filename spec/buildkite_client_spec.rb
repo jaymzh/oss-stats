@@ -7,6 +7,26 @@ RSpec.describe OssStats::BuildkiteClient do
   let(:organization_slug) { 'test-org' }
   let(:client) { described_class.new(token) }
 
+  describe '#get_pipeline' do
+    it 'applies ci_timeout to Buildkite connection and response waits' do
+      timeout = 42
+      client = described_class.new(token, ci_timeout: timeout)
+      http = double
+      response = double(
+        is_a?: true,
+        body: '{"data":{"pipeline":{"url":"https://buildkite.com/test"}}}',
+      )
+
+      allow(Net::HTTP).to receive(:new).and_return(http)
+      allow(http).to receive(:use_ssl=)
+      allow(http).to receive(:request).and_return(response)
+      expect(http).to receive(:open_timeout=).with(timeout)
+      expect(http).to receive(:read_timeout=).with(timeout)
+
+      client.get_pipeline('test-org', 'test-pipeline')
+    end
+  end
+
   describe '#get_pipeline_builds' do
     let(:pipeline_slug) { 'test-pipeline' }
     let(:pull_request_id) { '123' }
