@@ -14,8 +14,9 @@ module OssStats
     # @param token [String] The Buildkite API token.
     # @param organization_slug [String] The slug of the Buildkite organization.
 
-    def initialize(token)
+    def initialize(token, ci_timeout: nil)
       @token = token
+      @ci_timeout = ci_timeout
       @graphql_endpoint = URI('https://graphql.buildkite.com/v1')
     end
 
@@ -198,6 +199,8 @@ module OssStats
     def execute_graphql_query(query)
       http = Net::HTTP.new(@graphql_endpoint.host, @graphql_endpoint.port)
       http.use_ssl = true
+      http.open_timeout = @ci_timeout if @ci_timeout
+      http.read_timeout = @ci_timeout if @ci_timeout
       request = Net::HTTP::Post.new(@graphql_endpoint.request_uri)
       request['Authorization'] = "Bearer #{@token}"
       request['Content-Type'] = 'application/json'

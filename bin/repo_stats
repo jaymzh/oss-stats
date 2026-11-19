@@ -29,7 +29,9 @@ def main
 
   if mode.include?('ci') && config.buildkite_org
     bk_token = get_buildkite_token!(config)
-    bk_client = OssStats::BuildkiteClient.new(bk_token)
+    bk_client = OssStats::BuildkiteClient.new(
+      bk_token, ci_timeout: config.ci_timeout
+    )
     bk_pipelines_by_repo = bk_client.pipelines_by_repo(config.buildkite_org)
   end
 
