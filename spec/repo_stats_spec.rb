@@ -186,6 +186,68 @@ RSpec.describe 'repo_stats' do
   end
 
   describe '#get_failed_tests_from_ci' do
+    [Octokit::NotFound, Octokit::BadGateway, StandardError].each do |error_type|
+      it "logs #{error_type} and continues checking other branches" do
+        error = if error_type == StandardError
+                  error_type.new('API unavailable')
+                else
+                  error_type.new(body: { message: 'API unavailable' })
+                end
+        expect(client).to receive(:workflows)
+          .with('test_org/test_repo').ordered
+          .and_raise(error)
+        expect(client).to receive(:workflows)
+          .with('test_org/test_repo').ordered
+          .and_return(double(workflows: []))
+        log_level = error_type == Octokit::NotFound ? :warn : :error
+        expect(OssStats::Log).to receive(log_level)
+          .with(a_string_including('test_org/test_repo', 'main', error.message))
+
+        failed_tests = get_failed_tests_from_ci(
+          client, nil, options.merge(branches: %w{main stable}), {}
+        )
+
+        expect(failed_tests).to eq('main' => {}, 'stable' => {})
+      end
+    end
+
+    it 'preserves failures and merges Buildkite after a job API error' do
+      allow(client).to receive(:workflows).and_return(
+        double(workflows: [
+                 double(id: 1, name: 'Test Workflow', html_url: 'testurl'),
+               ]),
+      )
+      allow(client).to receive(:workflow_runs).with(
+        'test_org/test_repo', 1, hash_including(page: 1)
+      ).and_return(double(workflow_runs: [
+                            double(id: 1, created_at: Date.today),
+                            double(id: 2, created_at: Date.today - 1),
+                          ]))
+      allow(client).to receive(:workflow_run_jobs)
+        .with('test_org/test_repo', 1, per_page: 100)
+        .and_return(double(jobs: [
+                             double(name: 'Test Job', conclusion: 'failure'),
+                           ]))
+      allow(client).to receive(:workflow_run_jobs)
+        .with('test_org/test_repo', 2, per_page: 100)
+        .and_raise(
+          Octokit::BadGateway.new(body: { message: 'API unavailable' }),
+        )
+      expect(OssStats::Log).to receive(:error)
+        .with(%r{main.*test_org/test_repo.*API unavailable})
+      bk_client = double('Buildkite client')
+      expect(self).to receive(:get_bk_failed_tests)
+        .with(client, bk_client, 'test_org/test_repo', {}, options, ['main'])
+        .and_return('main' => { '[BK] pipeline' => { dates: Set[Date.today] } })
+
+      failed_tests = get_failed_tests_from_ci(client, bk_client, options, {})
+
+      expect(failed_tests['main']['Test Workflow / Test Job'][:dates])
+        .to eq(Set[Date.today])
+      expect(failed_tests['main']['[BK] pipeline'][:dates])
+        .to eq(Set[Date.today])
+    end
+
     it 'fetches failed tests from CI workflows' do
       allow(client).to receive(:readme).with('test_org/test_repo')
                                        .and_return(double(content: ''))

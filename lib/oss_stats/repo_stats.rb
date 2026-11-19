@@ -552,20 +552,20 @@ module OssStats
             end
           end
         end
+      rescue Octokit::NotFound => e
+        log.warn(
+          "Workflow API returned 404 for #{repo} branch " +
+          "#{branch}: #{e.message}.",
+        )
+      rescue StandardError => e
+        log.error(
+          "Error processing branch #{branch} for repo " +
+          "#{repo}: #{e.message}",
+        )
+        log.debug(e.backtrace.join("\n"))
       end
 
       failed_tests
-    rescue Octokit::NotFound => e
-      log.warn(
-        "Workflow API returned 404 for #{repo} branch " +
-        "#{branch}: #{e.message}.",
-      )
-    rescue Octokit::Error, StandardError => e
-      log.error(
-        "Error processing branch #{branch} for repo " +
-        "#{repo}: #{e.message}",
-      )
-      log.debug(e.backtrace.join("\n"))
     end
 
     # Fetches failed test results from CI systems (GitHub Actions and Buildkite)
